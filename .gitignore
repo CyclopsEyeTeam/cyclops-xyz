@@ -1,0 +1,4 @@
+node_modules/
+.xyz
+.xyz-pending*
+*.log

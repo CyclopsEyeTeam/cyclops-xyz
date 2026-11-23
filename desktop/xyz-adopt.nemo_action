@@ -1,0 +1,9 @@
+[Nemo Action]
+Active=true
+Name=Bring into XYZ
+Comment=Keep this folder's work with XYZ, right where it is
+Exec=env XYZ_NODE=@NODE@ @XYZ_HOME@/desktop/xyz-desktop.sh adopt %F
+Icon-Name=folder-new
+Selection=S
+Extensions=dir;
+Quote=double

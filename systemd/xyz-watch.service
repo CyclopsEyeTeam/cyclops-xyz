@@ -1,0 +1,8 @@
+[Unit]
+Description=XYZ auto-saver: keep every project that changed
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=@NODE@ @XYZ_HOME@/bin/xyz.mjs watch
