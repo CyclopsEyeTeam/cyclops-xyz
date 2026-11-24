@@ -3,7 +3,7 @@ import { readdirSync, lstatSync, existsSync, readFileSync, statSync } from 'node
 import { join, basename, resolve, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { adopt, aboutFrom } from './project.mjs';
+import { adopt, aboutFrom, ROOT } from './project.mjs';
 
 const NO_DESCEND = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', '.cache', '.tmp']);
 const git = (cwd, ...a) => { try { return execFileSync('git', ['-c', 'core.quotepath=off', ...a], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 }).trim(); } catch { return ''; } };
@@ -62,10 +62,16 @@ function notesFor(folder, story) {
     `## For the next person\n\nRun \`xyz ${name}\` to see everything about this project. Work in Y. When you finish something, \`xyz save "why"\`. Don't commit to git here.\n`;
 }
 
-export function convert(path, { includeOnline = false, who = 'agent', all = null } = {}) {
+export function convert(path, { includeOnline = false, who = 'agent', all = null, dryRun = false } = {}) {
   path = resolve(path);
   const g = join(path, '.git');
-  if (!existsSync(g)) return adopt(path, { who });
+  if (dryRun) {
+    // the same checks as the real thing, and nothing changed
+    if (!existsSync(path) || !lstatSync(path).isDirectory()) throw new Error(`${path} is not a folder`);
+    if (existsSync(join(path, '.xyz'))) throw new Error(`${basename(path)} is already in XYZ (home: ${readFileSync(join(path, '.xyz'), 'utf8').trim()})`);
+    if (existsSync(join(ROOT(), basename(path)))) throw new Error(`a project called ${basename(path)} already exists at ${join(ROOT(), basename(path))}; rename the folder first`);
+  }
+  if (!existsSync(g)) return dryRun ? { dryRun: true, name: basename(path), path, how: 'adopt (no git here)' } : adopt(path, { who });
   if (!lstatSync(g).isDirectory()) throw new Error(`${basename(path)} is a git worktree link (its history lives elsewhere); convert the main folder instead, or bring this folder in as it is with: xyz adopt ${path}`);
   if (!workingGit(path)) throw new Error(`${basename(path)}/.git is not a working git folder (empty or broken); use: xyz adopt ${path}`);
   if (existsSync(join(path, '.xyz'))) throw new Error(`${basename(path)} is already in XYZ (home: ${readFileSync(join(path, '.xyz'), 'utf8').trim()})`);
@@ -73,6 +79,7 @@ export function convert(path, { includeOnline = false, who = 'agent', all = null
   if (remote && !includeOnline) throw new Error(`${basename(path)} has an online copy (${remote}); converting would stop it being kept up to date there. Add --include-online to bring it in anyway`);
   const kids = (all ?? findGitFolders(path)).filter(f => f.path !== path && f.path.startsWith(path + '/')).map(f => relative(path, f.path) + '/');
   const s = gitStory(path);
+  if (dryRun) return { dryRun: true, name: basename(path), path, how: 'convert from git', lastSaved: s.lastAt ? new Date(s.lastAt).toLocaleString('en-GB') : null, unsaved: s.unsaved, messages: s.messages.slice(0, 5), leftOut: kids, remote };
   const note = `Before XYZ (git): last saved ${s.lastAt ? new Date(s.lastAt).toLocaleString('en-GB') : 'never'}${s.lastWho ? ` by ${s.lastWho}` : ''}; ${s.unsaved} unsaved file${s.unsaved === 1 ? '' : 's'} at conversion (all kept in this first snapshot).\n` +
     (s.messages.length ? `Last git messages:\n${s.messages.map(m => `  - ${m}`).join('\n')}\n` : '') +
     (kids.length ? `Git folders inside, left out of this project (not kept by XYZ until converted on their own): ${kids.join(', ')}\n` : '') +
@@ -125,6 +132,7 @@ export function convertCli({ rest, flags, who, out, fail }) {
     return out(r, L.join('\n'));
   }
   if (!rest[0]) fail('which folder? xyz convert <folder>   or all of them: xyz convert --all [folder] --dry-run');
-  const p = convert(rest[0], { includeOnline: !!flags['include-online'], who });
+  const p = convert(rest[0], { includeOnline: !!flags['include-online'], who, dryRun: !!flags['dry-run'] });
+  if (p.dryRun) return out(p, `Would bring ${p.name} into XYZ (${p.how}), right where it is; nothing changed yet.\n  ${p.path}${p.lastSaved ? `\n  Last git save: ${p.lastSaved}; ${p.unsaved} unsaved file${p.unsaved === 1 ? '' : 's'} (they'd all be kept)` : ''}${p.leftOut?.length ? `\n  Git folders inside, left out: ${p.leftOut.join(', ')}` : ''}${p.remote ? `\n  It has an online copy (${p.remote}): add --include-online to convert it anyway` : ''}\n  Do it with: xyz convert ${p.path}`);
   out({ name: p.name, home: p.home }, `${p.name} is in XYZ now, right where it was. Its git story is in the first receipt.\n  See it all: xyz ${p.name}`);
 }

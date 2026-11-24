@@ -22,7 +22,7 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz list                 every project, with its latest receipt
   xyz new <Name>           start a new project with X, Y and Z        (--at <folder> to make it there)
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
-  xyz convert <folder>     bring a git folder in, keeping its story    (--all [folder] --dry-run --include-online)
+  xyz convert <folder>     bring a git folder in, keeping its story    (--dry-run to only look · --all [folder] · --include-online)
   xyz save "why"           keep how Y is now, with a receipt saying why   (--learned "<tip>" adds a line to the map)
   xyz receipts [n]         the latest receipts
   xyz show <receipt>       one receipt in full                         e.g. xyz show r-0042

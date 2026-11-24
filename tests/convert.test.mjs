@@ -71,3 +71,16 @@ test('worktree links and release copies are reported, not converted; dry-run cha
   assert.equal(existsSync(root) && readdirSync(root).length, 0, 'dry-run made nothing');
   assert.equal(existsSync(join(w, 'Main', '.xyz')), false);
 });
+
+test('convert --dry-run on one folder only looks', async () => {
+  const { tmp, tree, xyz } = await import('./helpers.mjs');
+  const { join } = await import('node:path'); const { existsSync } = await import('node:fs'); const { execFileSync } = await import('node:child_process');
+  const root = tmp('root-'), work = tmp('work-');
+  const g = tree(join(work, 'Gitty'), { 'a.txt': 'a' });
+  execFileSync('git', ['init', '-q'], { cwd: g }); execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.'], { cwd: g }); execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'first'], { cwd: g });
+  const plain = tree(join(work, 'Plainy'), { 'b.txt': 'b' });
+  const r = xyz(root, ['convert', g, '--dry-run']);
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /Would bring Gitty into XYZ \(convert from git\)/);
+  assert.match(xyz(root, ['convert', plain, '--dry-run']).out, /Would bring Plainy into XYZ \(adopt/);
+  assert.ok(!existsSync(join(g, '.xyz')) && !existsSync(join(plain, '.xyz')) && !existsSync(join(root, 'Gitty')), 'nothing changed');
+});
