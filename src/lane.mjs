@@ -2,7 +2,7 @@
 // there; `xyz land` merges its changes into Y in the order lanes land (each later lane is merged on top of
 // what landed before it) and keeps one receipt signed by that agent with only its files. Clashing lines are
 // never forced: they go back into the lane, marked, for the agent to fix and land again.
-import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, symlinkSync, unlinkSync, rmSync, writeFileSync, mkdtempSync, readlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, symlinkSync, unlinkSync, rmSync, rmdirSync, writeFileSync, mkdtempSync, readlinkSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -57,7 +57,8 @@ function writeEntry(root, rel, f, z) {
 
 function removeEntry(root, rel) {
   rmSync(join(root, rel), { force: true });
-  for (let d = dirname(join(root, rel)); d.startsWith(root + '/'); d = dirname(d)) { try { if (readdirSync(d).length) break; rmSync(d, { recursive: false }); } catch { break; } }
+  // tidy folders the removal left empty, up to (never including) the root; rmdir only ever removes an empty folder
+  for (let d = dirname(join(root, rel)); d.startsWith(root + '/'); d = dirname(d)) { try { if (readdirSync(d).length) break; rmdirSync(d); } catch { break; } }
 }
 
 /** Start a lane: a copy of Y as it is right now, numbered in order. */
@@ -305,7 +306,7 @@ export function laneCli({ cmd, rest, flags, who, out, fail, here }) {
       if (r.nothing) return out(r, `Nothing to land: lane ${lane.id} has no changes.`);
       if (r.unresolved) { out(r, `Nothing landed: the last clash isn't settled yet.\n${r.unresolved.map(x => `  ${x}`).join('\n')}\nThen run xyz land again.`); process.exitCode = 1; return; }
       if (r.clashes.length) return out({ ...r, clashes: r.clashes.map(c => ({ file: c.rel, why: c.why ?? 'same lines changed on both sides' })) },
-        `Nothing landed yet: ${r.clashes.length} file${r.clashes.length === 1 ? '' : 's'} clash with work that landed in Y first.\nYour lane now sits on top of Y as it is. To settle:\n${r.clashes.map(c => c.kind === 'text' ? `  ${c.rel} — same lines changed on both sides: fix the <<<<<<< / >>>>>>> parts` : `  ${c.rel} — ${c.why}: Y's side is in ${c.side}; keep what you want in ${c.rel}, then delete ${c.side}`).join('\n')}\nThen run xyz land again.`);
+        `Nothing landed yet: ${r.clashes.length} file${r.clashes.length === 1 ? ' clashes' : 's clash'} with work that landed in Y first.\nYour lane now sits on top of Y as it is. To settle:\n${r.clashes.map(c => c.kind === 'text' ? `  ${c.rel} — same lines changed on both sides: fix the <<<<<<< / >>>>>>> parts` : `  ${c.rel} — ${c.why}: Y's side is in ${c.side}; keep what you want in ${c.rel}, then delete ${c.side}`).join('\n')}\nThen run xyz land again.`);
       return out(r, `${lane.id} landed in Y: ${r.landed.length} file${r.landed.length === 1 ? '' : 's'}${r.receipt ? ` · receipt ${r.receipt.id}` : ' (Y already had them)'}.\n${r.kept ? '  The lane stays open on top of Y.' : r.folderLeft ? `  The lane is closed (its last state is kept in Z). Your shell is standing in it, so the folder stays until you leave;\n  the auto-saver tidies it away after. Carry on in Y: cd ${p.y}` : `  The lane is closed (its last state is kept in Z). Carry on in Y (${p.y}), or start a new lane.`}${r.receipt ? `\n  Undo with: xyz undo ${r.receipt.id}` : ''}`);
     }
     case 'drop': {

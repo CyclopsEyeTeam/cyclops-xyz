@@ -209,3 +209,15 @@ test('landing from inside a lane leaves the folder (so the shell keeps working) 
   const fromY = lane(root, y, 'two', 'claude-a'); writeFileSync(join(fromY.path, 'src', 'b.js'), 'A2\n');
   assert.equal(xyz(root, ['land'], { cwd: fromY.path }).code, 0);
 });
+
+test('folders a landing empties are removed from Y; folders with other files stay', () => {
+  const { root, y } = project();
+  tree(y, { 'src/old/a.js': 'a', 'src/old/deep/b.js': 'b', 'src/keep/c.js': 'c', 'src/keep/d.js': 'd' });
+  xyz(root, ['save', 'more files'], { cwd: y });
+  const l = lane(root, y, 'remove old', 'claude-a');
+  for (const f of ['src/old/a.js', 'src/old/deep/b.js', 'src/keep/c.js']) unlinkSync(join(l.path, f));
+  const r = xyz(root, ['land'], { cwd: l.path }); assert.equal(r.code, 0, r.out);
+  assert.ok(!existsSync(join(y, 'src', 'old')), 'the emptied folder tree is gone');
+  assert.ok(existsSync(join(y, 'src', 'keep', 'd.js')) && !existsSync(join(y, 'src', 'keep', 'c.js')));
+  assert.ok(existsSync(join(y, 'src')));
+});
