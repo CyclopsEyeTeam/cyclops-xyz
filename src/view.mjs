@@ -1,5 +1,5 @@
 // What people see: one project on one screen, and the list of all projects.
-import { existsSync, readFileSync, readlinkSync } from 'node:fs';
+import { existsSync, readFileSync, readlinkSync, statSync, readdirSync } from 'node:fs';
 import { join, basename, dirname, resolve } from 'node:path';
 import { scan, diff } from './scan.mjs';
 import { listReceipts, when } from './receipts.mjs';
@@ -69,8 +69,17 @@ export function listInfo() {
   return allHomes().map(h => {
     try {
       const p = openProject(h), last = listReceipts(p.z, 1)[0];
-      let unsaved = null; try { const c = changesNow(p); unsaved = c.added.length + c.removed.length + c.changed.length; } catch {}
-      return { name: p.name, home: h, last: last ? { id: last.id, at: last.at, title: last.title } : null, unsaved, live: liveInfo(p).current };
+      let unsaved = null, c = null; try { c = changesNow(p); unsaved = c.added.length + c.removed.length + c.changed.length; } catch {}
+      let about = ''; try { about = readFileSync(join(p.z, 'NOTES.md'), 'utf8').split(/\n\s*\n/).map(x => x.trim()).find(x => x && !x.startsWith('#')) ?? ''; } catch {}
+      if (/^What this is, in a sentence/.test(about)) about = '';
+      let lanes = 0; try { lanes = laneLines(p).length; } catch {}
+      const lv = liveInfo(p);
+      // last activity: a receipt, a signed edit, a lane checkpoint or an unsaved file — whichever is newest
+      const mt = f => { try { return statSync(f).mtimeMs; } catch { return 0; } };
+      let active = Math.max(last?.at ?? 0, mt(join(p.z, 'receipts.jsonl')), mt(join(p.z, 'touches.jsonl')));
+      try { for (const l of readdirSync(join(p.z, 'lanes'))) active = Math.max(active, mt(join(p.z, 'lanes', l, 'lane.json')), mt(join(p.z, 'lanes', l, 'checkpoint.json'))); } catch {}
+      if (unsaved && c) for (const r of [...c.added, ...c.changed]) active = Math.max(active, mt(join(p.y, r)));
+      return { name: p.name, home: h, y: p.y, x: p.x, z: p.z, active, about: about.replace(/\s+/g, ' ').slice(0, 300), last: last ? { id: last.id, at: last.at, title: last.title, who: last.who } : null, unsaved, live: lv.current, liveLabel: lv.label, lanes };
     } catch (e) { return { name: basename(h), home: h, error: e.message }; }
   });
 }

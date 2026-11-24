@@ -67,6 +67,15 @@ if [ "$PICK_ONLY" = 0 ]; then
       chmod +x "$S/Bring into XYZ"; say "added: right-click → Scripts → Bring into XYZ"
     fi
   fi
+  # ---- XYZ Manager in the app menu (needs Python 3 with GTK 3, as on Mint / Ubuntu / Fedora desktops)
+  if python3 -c "import gi; gi.require_version('Gtk','3.0')" 2>/dev/null; then
+    if ask "Add 'XYZ Manager' (every project on one screen, with folder buttons and extract) to the app menu?" y; then
+      D="$HOME/.local/share/applications"; mkdir -p "$D"
+      sed -e "s#@XYZ_HOME@#$HERE#g" "$HERE/desktop/xyz-manager.desktop" > "$D/xyz-manager.desktop"
+      chmod +x "$HERE/desktop/xyz-manager.py"
+      say "XYZ Manager added to the app menu"
+    fi
+  fi
 fi
 
 # ---- bring in existing projects

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=XYZ Manager
+Comment=Every XYZ project on one screen: open its X, Y and Z, read its notes, extract it to a .zip
+Exec=python3 @XYZ_HOME@/desktop/xyz-manager.py
+Icon=folder-documents
+Terminal=false
+Categories=Utility;

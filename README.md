@@ -51,6 +51,19 @@ The installer:
 Run `./install.sh --pick` any time to bring more folders in, and `./uninstall.sh` to remove the command,
 the auto-saver and the menu items. Uninstalling never touches your projects or their receipts.
 
+## XYZ Manager
+
+`desktop/xyz-manager.py` (in the app menu as **XYZ Manager** after `./install.sh`) shows every project on one
+screen, most recently changed first: its description, what's live, unsaved files and open lanes, and its latest
+receipt. Each project has buttons to open its **Source (Y)**, **Live (X)** and **Memory (Z)** folders, its notes,
+and **Extract .zip**. It only reads and extracts; it never saves, promotes or changes a project. Projects are
+ordered by last activity (receipts, signed edits, lanes, unsaved files) and the list refreshes itself. Needs
+Python 3 with GTK 3 (standard on Mint, Ubuntu and Fedora desktops).
+
+Its header shows an ASCII-art XYZ banner next to an eye: set `XYZ_EYE_HTML` to an animated eye page (an HTML/SVG
+page; with WebKit2GTK it plays live in the header, paced to 24 frames a second, 6 in the background). Without one,
+an ASCII eye stands in.
+
 ## Your first project
 
 ```sh
