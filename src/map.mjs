@@ -79,6 +79,8 @@ function howTo(p, files) {
   const entries = files.filter(f => ENTRY.test(basename(f)) && f.split('/').length <= 2 && !/^(tests?|node_modules|vendor)\//.test(f)).slice(0, 6);
   for (const f of entries) if (!run.some(r => r.includes(f))) run.push(`${f}${firstComment(join(y, f)) ? `  —  ${firstComment(join(y, f))}` : ''}`);
   const testDirs = [...new Set(files.map(f => f.split('/')[0]).filter(d => /^(tests?|spec|__tests__)$/.test(d)))];
+  // a project's own test runners (e.g. test/shell/run.mjs) beat a guess
+  for (const f of files.filter(f => /^(tests?|spec)\/(.+\/)?(run|runner|all)\.(m?js|py|sh)$/.test(f)).slice(0, 6)) test.push(`${f.endsWith('.py') ? 'python3' : f.endsWith('.sh') ? 'bash' : 'node'} ${f}`);
   if (testDirs.length && !test.length) {
     const kinds = new Set(files.filter(f => testDirs.includes(f.split('/')[0])).map(f => f.split('.').pop()));
     test.push(kinds.has('py') ? `pytest ${testDirs.join(' ')}` : kinds.has('mjs') || kinds.has('js') ? `node --test ${testDirs[0]}/` : `tests in ${testDirs.join(', ')}/`);
