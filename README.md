@@ -78,16 +78,18 @@ xyz convert ~/Documents/MyWebsite   # a git folder: keeps its story
 | --- | --- |
 | `xyz` | Everything about the project you're in (or the list of projects, outside one). |
 | `xyz <project>` | Everything about one project, by a loose name. |
+| `xyz arrive` | A short brief for an agent arriving in the project: what it is, how to run and test it, where things live, what to be careful with, what is moving. `--hook` is silent outside projects. |
+| `xyz map [project]` | Refresh and show the project's map, `Z/MAP.md`. |
 | `xyz list` | Every project, with its latest receipt. |
 | `xyz new <Name>` | Start a project with X, Y and Z (`--at <folder>` to make it somewhere else). |
 | `xyz adopt <folder>` | Bring a folder in where it is. |
 | `xyz convert <folder>` | Bring a git folder in, keeping its last git messages. `--all <folder> --dry-run` previews many. |
-| `xyz save "why"` | Keep how Y is now, with a receipt saying why. |
+| `xyz save "why"` | Keep how Y is now, with a receipt saying why. `--learned "<tip>"` leaves a line in the map. |
 | `xyz receipts [n]` / `xyz show r-0042` | The latest receipts / one receipt in full. |
 | `xyz undo r-0042` | Reverse just that change (shows what it will do and asks; `--yes` for scripts). |
 | `xyz try "<command>"` | Run a command on a copy of Y in RAM (`/dev/shm`), then throw the copy away. |
 | `xyz promote` / `xyz rollback` | Make Y the live version in X / go back to the previous one. |
-| `xyz watch` | Save every project that changed (the auto-saver runs this). |
+| `xyz watch` | Save every project that changed and refresh its map (the auto-saver runs this). |
 | `xyz help` | All of this, in the terminal. |
 
 Sign receipts with `--who <name>` or `XYZ_WHO=<name>`. Every read command has `--json`.
@@ -113,6 +115,20 @@ instruction block: copy it into your agent's instructions (for example `~/.codex
 project's `AGENTS.md` or `CLAUDE.md`) and agents will look around with `xyz`, sign their own receipts
 and keep `NOTES.md` current. In our first test, an agent told nothing about XYZ found it on its own,
 read the notes, did its job and signed its receipt.
+
+### Light from the first moment
+
+Every project keeps a map, `Z/MAP.md`: how to run and test it, what each folder is for, warnings found
+in its notes (HOLDs, "never", "do not"), the files changing most and the latest reasons. The auto-saver
+refreshes the facts; everything under its `## Kept by hand` heading stays as written. `xyz arrive` turns
+the map and the notes' "In progress" into a brief of about a thousand words, so an agent knows its way
+around before it opens a single file. To give it to Claude Code at the start of every session, add a
+hook to `~/.claude/settings.json`:
+
+```json
+"hooks": { "SessionStart": [ { "matcher": "startup|resume|clear|compact",
+  "hooks": [ { "type": "command", "command": "xyz arrive --hook", "timeout": 10 } ] } ] }
+```
 
 Agents that run in a sandbox which can write the project folder but not Z still work: `xyz save` leaves
 their note in Y, and the auto-saver turns it into a signed receipt.

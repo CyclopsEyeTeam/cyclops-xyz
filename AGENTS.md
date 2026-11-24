@@ -13,10 +13,12 @@ history and one `NOTES.md`). One command, `xyz`, does everything. The person you
 version-control ceremony: never ask them about commits, staging, branches or saving.
 
 **When you arrive**
-- Run `xyz` inside the project folder (or `xyz <project>` from anywhere; names match loosely). It shows
-  what the project is, where X/Y/Z are, what is live, what changed since the last receipt, and the
-  latest receipts.
-- Read `Z/NOTES.md` (its path is in the `xyz` output) before changing anything.
+- Run `xyz arrive` inside the project folder (or `xyz arrive <project>` from anywhere; names match loosely).
+  It is a short brief: what the project is, how to run and test it, where things live, what to be careful
+  with, what is in progress and what changed lately. A session-start hook can inject it for you:
+  `xyz arrive --hook` prints nothing outside XYZ projects and never fails.
+- The full map is `Z/MAP.md` (refreshed by the auto-saver); read it before searching the code.
+  `Z/NOTES.md` has the story.
 
 **While you work**
 - Work in Y. Edit files normally.
@@ -24,6 +26,7 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 
 **When you finish a piece of work**
 - `xyz save "what you did and why, in plain words" --who <your agent name>` (or set `XYZ_WHO`).
+  Add `--learned "<one thing about this terrain>"` to leave a line in the map for the next agent.
   One receipt per finished piece is ideal; the auto-saver also keeps changes every 15 minutes.
 - If `xyz save` says Z can't be written from where you are (a sandbox), that's fine: your note waits in Y
   and the auto-saver turns it into a signed receipt.

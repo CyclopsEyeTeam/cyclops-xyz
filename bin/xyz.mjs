@@ -7,16 +7,18 @@ import { save } from '../src/save.mjs';
 import { listReceipts, getReceipt, markdown } from '../src/receipts.mjs';
 import { projectView, projectInfo, listView, listInfo } from '../src/view.mjs';
 
-const COMMANDS = ['new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
+const COMMANDS = ['arrive', 'map', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
   xyz <project>            everything about one project: xyz my-app · xyz --my-app · xyz app
+  xyz arrive               the short arrival brief for an agent (map, notes, what is moving)   (--hook: silent outside projects)
+  xyz map [project]        refresh and show the project's map, Z/MAP.md (the auto-saver keeps it fresh)
   xyz list                 every project, with its latest receipt
   xyz new <Name>           start a new project with X, Y and Z        (--at <folder> to make it there)
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
   xyz convert <folder>     bring a git folder in, keeping its story    (--all [folder] --dry-run --include-online)
-  xyz save "why"           keep how Y is now, with a receipt saying why
+  xyz save "why"           keep how Y is now, with a receipt saying why   (--learned "<tip>" adds a line to the map)
   xyz receipts [n]         the latest receipts
   xyz show <receipt>       one receipt in full                         e.g. xyz show r-0042
   xyz undo <receipt>       reverse just that change, keep everything after it   (--yes, --skip-changed)
@@ -30,13 +32,13 @@ Everywhere: --json for tools, --yes to never be asked, --who <name> to sign rece
 
 // ---- arguments ----
 const argv = process.argv.slice(2), flags = {}, pos = [];
-const VALUE_FLAGS = new Set(['who', 'at']);
+const VALUE_FLAGS = new Set(['who', 'at', 'learned']);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith('--') && a.length > 2) { const k = a.slice(2); if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
+const KNOWN = new Set(['learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
@@ -67,6 +69,16 @@ async function main() {
       return out(projectInfo(p), projectView(p));
     }
     case 'help': return console.log(HELP);
+    case 'arrive': {
+      const { arriveCli } = await import('../src/arrive.mjs');
+      return arriveCli({ query: rest[0], flags, out, fail });
+    }
+    case 'map': {
+      const { refreshMap, mapFile } = await import('../src/map.mjs');
+      const p = here(rest[0] ?? null); refreshMap(p);
+      const text = readFileSync(mapFile(p), 'utf8');
+      return out({ name: p.name, map: mapFile(p), text }, text.trimEnd());
+    }
     case 'list': return out(listInfo(), listView());
     case 'new': {
       if (!rest[0]) fail('give it a name: xyz new <Name>');
@@ -83,6 +95,7 @@ async function main() {
       const p = here(null), why = rest.join(' ').trim();
       if (!why) fail('say why in a few words: xyz save "fixed the drawing crash"');
       let r;
+      if (flags.learned) { try { const { learn } = await import('../src/map.mjs'); learn(p, flags.learned, who()); } catch (e) { if (!['EACCES', 'EROFS', 'EPERM'].includes(e.code)) throw e; } }
       try { r = save(p, { why, who: who() }); }
       catch (e) {
         if (!['EACCES', 'EROFS', 'EPERM'].includes(e.code)) throw e;
