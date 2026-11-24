@@ -106,6 +106,7 @@ xyz convert ~/Documents/MyWebsite   # a git folder: keeps its story
 | `xyz save "why"` | Keep how Y is now, with a receipt saying why. `--learned "<tip>"` leaves a line in the map. |
 | `xyz receipts [n]` / `xyz show r-0042` | The latest receipts / one receipt in full. |
 | `xyz undo r-0042` | Reverse just that change (shows what it will do and asks; `--yes` for scripts). |
+| `xyz test [files]` | Run the project's tests side by side; a file unchanged since it last passed counts from the shared buffer (see below). |
 | `xyz try "<command>"` | Run a command on a copy of Y in RAM (`/dev/shm`), then throw the copy away. |
 | `xyz promote` / `xyz rollback` | Make Y the live version in X / go back to the previous one. |
 | `xyz watch` | Save every project that changed and refresh its map (the auto-saver runs this). |
@@ -124,6 +125,7 @@ Each project home (`~/XYZ/<project>/`) has a small `xyz.json`:
 | `check` | A command that must pass before `xyz promote` (for example `npm test`). |
 | `services` / `servicesFromX` | systemd user services to restart after a promote or rollback, once they run from `X/current`. |
 | `tryMaxMB` | The largest project `xyz try` will copy into RAM (2048 by default). |
+| `tests` | How `xyz test` finds and runs the test files (below). |
 
 `XYZ_ROOT` moves the list of projects (default `~/XYZ`); `XYZ_RAM` moves the RAM copies.
 
@@ -168,6 +170,34 @@ hook to `~/.claude/settings.json`:
 
 Agents that run in a sandbox which can write the project folder but not Z still work: `xyz save` leaves
 their note in Y, and the auto-saver turns it into a signed receipt.
+
+### Tests that remember: `xyz test`
+
+`xyz test` runs each test file in fresh state, several side by side. While a file runs, a recorder notes
+everything it depends on (modules loaded, files read, folders listed, scripts handed to other programs) in
+every process it starts. When the file passes, a fingerprint of each is kept in `Z/test-buffer`, shared
+by Y, every lane and promote's check copy. Next time, a file whose fingerprints all still match counts
+from the buffer and only the rest run. One real suite went from 44 minutes to under 19 the first time, and
+an unchanged rerun takes seconds. Only passes are kept, a pass older than a day runs again anyway, and a
+file that fails beside others runs again alone before it counts as failed. The latest whole run lands in
+`Z/tests/last.json`, which `xyz arrive` and `xyz lanes` show to every agent. Using it as the promote check
+(`"check": "xyz test --bail"`) means promote reruns only what changed.
+
+```json
+"tests": {
+  "files": "tests/*.test.mjs",
+  "run": ["node", "--test", "{file}"],
+  "recorder": "node",
+  "salt": ["scripts/test.sh"],
+  "jobs": 6, "maxAgeHours": 24
+}
+```
+
+Every key is optional. `recorder` is `node` (Node test processes, fast), `strace` (any language and every
+program, needs `strace`) or `none` (no buffer: just side by side and fresh state). `salt` lists files every
+test depends on that the recorder cannot see, such as a wrapper script. `xyz help test` lists the rest
+(`saltEnv`, `unsetEnv`, `env`, `ignore`, `scratch`, `memoryMax`). What it asks of your tests: one command runs
+one file, files don't depend on each other, and nothing leans on the clock or the network beyond the max age.
 
 ## FAQ
 

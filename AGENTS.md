@@ -35,6 +35,7 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 **While you work**
 - Work in Y. Edit files normally.
 - Quick tests can run on a throwaway copy in RAM: `xyz try "<command>"` (exit code passes through).
+- The whole suite: `xyz test` (side by side; files unchanged since they last passed count from the shared buffer in Z; `--full` runs everything). The last run shows in `xyz arrive`.
 
 **When you finish a piece of work**
 - `xyz save "what you did and why, in plain words" --who <your agent name>` (or set `XYZ_WHO`).

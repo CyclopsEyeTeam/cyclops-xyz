@@ -5,6 +5,7 @@ import { arrive } from './map.mjs';
 import { liveInfo } from './view.mjs';
 import { changesNow } from './save.mjs';
 import { laneHere, laneLines } from './lane.mjs';
+import { suiteLines } from './suite.mjs';
 
 export function arriveCli({ query, flags, out, fail }) {
   let p;
@@ -21,6 +22,8 @@ export function arriveCli({ query, flags, out, fail }) {
     const extra = [];
     if (here && here.lane.status !== 'open') extra.push(`▸ This is lane ${here.lane.id}'s old folder: it was already ${here.lane.status}. Work in Y (cd ${p.y}) or start a new lane.`);
     else if (here) extra.push(`▸ You are in lane ${here.lane.id} ("${here.lane.why}", ${here.lane.who}). Work here; \`xyz land\` merges it into Y in order.`);
+    let suite = []; try { suite = suiteLines(p); } catch {}
+    if (suite.length) extra.push(`▸ ${suite.join('\n  ')}`);
     if (lanes.length) extra.push(`▸ Open lanes (other agents at work)\n${lanes.join('\n')}`);
     extra.push(here ? '' : 'Working alongside other agents? Take your own lane first: xyz lane "what for" — then xyz land when done.');
     text = text.replace(/\n\nWhen you finish a piece:/, `\n\n${extra.filter(Boolean).join('\n\n')}\n\nWhen you finish a piece:`);

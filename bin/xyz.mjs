@@ -7,7 +7,7 @@ import { save } from '../src/save.mjs';
 import { listReceipts, getReceipt, markdown } from '../src/receipts.mjs';
 import { projectView, projectInfo, listView, listInfo } from '../src/view.mjs';
 
-const COMMANDS = ['extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
+const COMMANDS = ['extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'test', 'promote', 'rollback', 'list', 'watch', 'help'];
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
@@ -28,6 +28,8 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz show <receipt>       one receipt in full                         e.g. xyz show r-0042
   xyz undo <receipt>       reverse just that change, keep everything after it   (--yes, --skip-changed)
   xyz try "<command>"      run a command on a copy of Y in RAM, then clean up  e.g. xyz try "node --test"
+  xyz test [files]         run the project's tests side by side; files unchanged since they passed count from the buffer
+                           (--full, --bail, --jobs N, --log FILE; set up in xyz.json "tests", see xyz help test)
   xyz promote              check Y, then make it the live version in X
                            (--saved: only what's kept, checked on that copy · xyz promote r-0042: that receipt's state)
   xyz rollback             go back to the previous live version
@@ -39,13 +41,13 @@ Everywhere: --json for tools, --yes to never be asked, --who <name> to sign rece
 
 // ---- arguments ----
 const argv = process.argv.slice(2), flags = {}, pos = [];
-const VALUE_FLAGS = new Set(['who', 'at', 'learned', 'to']);
+const VALUE_FLAGS = new Set(['who', 'at', 'learned', 'to', 'jobs', 'log', 'max-age-hours']);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
+const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
@@ -93,7 +95,10 @@ async function main() {
       if (!p) return out(listInfo(), listView());
       return out(projectInfo(p), projectView(p));
     }
-    case 'help': return console.log(HELP);
+    case 'help': {
+      if (rest[0] === 'test') { const { fileURLToPath } = await import('node:url'); return console.log(readFileSync(fileURLToPath(new URL('../src/test.mjs', import.meta.url)), 'utf8').split('\nimport ')[0].replace(/^\/\/ ?/gm, '')); }
+      return console.log(HELP);
+    }
     case 'extract': { const { extractCli } = await import('../src/extract.mjs'); return extractCli({ p: here(rest[0] ?? null), flags, out }); }
     case 'changed': {
       const p = here(rest[0] ?? null), { changesNow, lastWriters } = await import('../src/save.mjs');
@@ -170,6 +175,10 @@ async function main() {
       return out(r, markdown(r));
     }
     case 'undo': { const { undoCli } = await import('../src/undo.mjs'); return undoCli({ p: here(null), rest, flags, who: who(), out, fail }); }
+    case 'test': {
+      const { testCli } = await import('../src/test.mjs');
+      return testCli({ p: here(null), rest, flags, who: flags.who || process.env.XYZ_WHO || null, fail });
+    }
     case 'try': { const { tryCli } = await import('../src/try.mjs'); return tryCli({ p: here(null), rest, flags, who: who(), out, fail }); }
     case 'promote': case 'rollback': {
       if (cmd === 'promote' && !flags.saved && !rest[0]) {

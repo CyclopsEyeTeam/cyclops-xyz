@@ -2,6 +2,7 @@
 // there; `xyz land` merges its changes into Y in the order lanes land (each later lane is merged on top of
 // what landed before it) and keeps one receipt signed by that agent with only its files. Clashing lines are
 // never forced: they go back into the lane, marked, for the agent to fix and land again.
+import { suiteLines } from './suite.mjs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, symlinkSync, unlinkSync, rmSync, rmdirSync, writeFileSync, mkdtempSync, readlinkSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -296,7 +297,9 @@ export function laneCli({ cmd, rest, flags, who, out, fail, here }) {
     }
     case 'lanes': {
       const p = inLane?.p ?? here(rest[0] ?? null), ls = listLanes(p, { all: !!flags.all });
-      return out(ls, ls.length ? (flags.all ? ls.map(l => `${l.id}  ${l.status.padEnd(7)} ${l.who}  "${l.why}"${l.receipt ? `  → ${l.receipt}` : ''}`).join('\n') : laneLines(p).join('\n')) : 'No open lanes. Start one with: xyz lane "what for"');
+      let suite = []; try { suite = suiteLines(p); } catch {}
+      const text = ls.length ? (flags.all ? ls.map(l => `${l.id}  ${l.status.padEnd(7)} ${l.who}  "${l.why}"${l.receipt ? `  → ${l.receipt}` : ''}`).join('\n') : laneLines(p).join('\n')) : 'No open lanes. Start one with: xyz lane "what for"';
+      return out(ls, suite.length ? `${text}\n\n${suite.join('\n')}` : text);
     }
     case 'land': {
       if (!inLane) fail('land works inside a lane (cd into it); see lanes with: xyz lanes');

@@ -221,3 +221,20 @@ test('folders a landing empties are removed from Y; folders with other files sta
   assert.ok(existsSync(join(y, 'src', 'keep', 'd.js')) && !existsSync(join(y, 'src', 'keep', 'c.js')));
   assert.ok(existsSync(join(y, 'src')));
 });
+
+test('the last test-suite run in Z/tests shows in arrive and in xyz lanes; a broken file shows nothing', () => {
+  const { root, y } = project();
+  const a = lane(root, y, 'suite', 'claude-a');
+  const home = join(a.path, '..', '..');
+  assert.doesNotMatch(xyz(root, ['arrive'], { cwd: y }).out, /Tests:/);
+  mkdirSync(join(home, 'Z', 'tests'), { recursive: true });
+  writeFileSync(join(home, 'Z', 'tests', 'last.json'), JSON.stringify({ at: new Date(Date.now() - 3 * 60000).toISOString(), who: 'Claude', tree: 'lane L1', pass: 7657, fail: 0, ran: 40, fromBuffer: 686, passed: true }));
+  writeFileSync(join(home, 'Z', 'tests', 'last-check.json'), JSON.stringify({ at: Date.now() - 3600000, tree: 'check', version: 6, fail: 2, failedFiles: ['x.test.mjs'], passed: false }));
+  const ar = xyz(root, ['arrive'], { cwd: y }).out;
+  assert.match(ar, /Tests: passed 7,657 · 40 ran, 686 buffered · 3 min ago · Claude, lane L1/);
+  assert.match(ar, /Promote check: FAILED 2 \(x\.test\.mjs\) · 60 min ago · check, on v6/);
+  assert.match(xyz(root, ['lanes'], { cwd: y }).out, /L1[\s\S]*Tests: passed 7,657/);
+  writeFileSync(join(home, 'Z', 'tests', 'last.json'), '{broken');
+  const r = xyz(root, ['arrive'], { cwd: a.path });
+  assert.equal(r.code, 0); assert.doesNotMatch(r.out, /Tests:/); assert.match(r.out, /Promote check/);
+});
