@@ -7,7 +7,7 @@ import { save } from '../src/save.mjs';
 import { listReceipts, getReceipt, markdown } from '../src/receipts.mjs';
 import { projectView, projectInfo, listView, listInfo } from '../src/view.mjs';
 
-const COMMANDS = ['changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
+const COMMANDS = ['extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
@@ -18,6 +18,7 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz land ["why"]         inside a lane: merge it into Y in order, one receipt with only your files  (--keep)
   xyz lanes                the open lanes: who, what for, how much changed   (--all for closed ones too)
   xyz drop [L2] --yes      close a lane without landing (its last state stays in Z)
+  xyz extract [project]    X, Y and Z in one .zip (to ~/XYZ/exports/; --to <file|folder>, --with-live)
   xyz list                 every project, with its latest receipt
   xyz new <Name>           start a new project with X, Y and Z        (--at <folder> to make it there)
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
@@ -38,13 +39,13 @@ Everywhere: --json for tools, --yes to never be asked, --who <name> to sign rece
 
 // ---- arguments ----
 const argv = process.argv.slice(2), flags = {}, pos = [];
-const VALUE_FLAGS = new Set(['who', 'at', 'learned']);
+const VALUE_FLAGS = new Set(['who', 'at', 'learned', 'to']);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
+const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
@@ -93,6 +94,7 @@ async function main() {
       return out(projectInfo(p), projectView(p));
     }
     case 'help': return console.log(HELP);
+    case 'extract': { const { extractCli } = await import('../src/extract.mjs'); return extractCli({ p: here(rest[0] ?? null), flags, out }); }
     case 'changed': {
       const p = here(rest[0] ?? null), { changesNow, lastWriters } = await import('../src/save.mjs');
       const c = changesNow(p), w = lastWriters(p.z, c.last?.at ?? 0);

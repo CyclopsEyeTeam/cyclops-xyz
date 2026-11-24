@@ -66,4 +66,6 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 - `xyz changed` lists every unsaved file and who last edited it.
 - If a project is busy, xyz names who holds it; add `--wait` to wait while the holder is still running (or `--wait=45m` for at most that long) instead of retrying.
 
+`xyz extract` puts a project's X, Y and Z in one .zip (a backup or a hand-over); only do it when asked.
+
 `xyz help` lists every command. Every read command accepts `--json`.

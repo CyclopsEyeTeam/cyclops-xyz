@@ -85,6 +85,7 @@ xyz convert ~/Documents/MyWebsite   # a git folder: keeps its story
 | `xyz lanes` / `xyz drop --yes` | Who is working where / close a lane without landing (kept in Z). |
 | `xyz changed` | Every unsaved file in Y and who last edited it. |
 | `xyz promote --saved` / `xyz promote r-0042` | Ship only what is kept (checked on that exact copy) / ship that receipt's state. |
+| `xyz extract [project]` | X, Y and Z in one `.zip`, laid out as a project home: unzip it into `~/XYZ` to bring the project back with its whole memory. Goes to `~/XYZ/exports/` (or `--to <file or folder>`); `--with-live` adds the live version. |
 | `xyz list` | Every project, with its latest receipt. |
 | `xyz new <Name>` | Start a project with X, Y and Z (`--at <folder>` to make it somewhere else). |
 | `xyz adopt <folder>` | Bring a folder in where it is. |
