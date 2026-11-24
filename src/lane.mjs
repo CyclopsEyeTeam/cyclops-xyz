@@ -230,20 +230,48 @@ export function land(p, l, { why = '', who = l.who, keep = false } = {}) {
       syncLane(p, l, now, laneNow(p, l), new Set());
       putFiles(p, l, 'base', now); putFiles(p, l, 'checkpoint', laneNow(p, l));
       putMeta(p, { ...l, landedAt: Date.now(), clashes: [], receipts: [...(l.receipts ?? []), r.id] });
-    } else closeLane(p, l, 'landed', r.id);
-    return { landed: plan.map(([rel]) => rel), clashes: [], receipt: r, kept: keep };
+    }
+    const closed = keep ? null : closeLane(p, l, 'landed', r.id);
+    return { landed: plan.map(([rel]) => rel), clashes: [], receipt: r, kept: keep, folderLeft: !!closed?.folderLeft };
   });
 }
 
-/** Close a lane: its last state stays in Z (checkpoint), its folder goes. Never removes the folder if that state can't be kept. */
+/** Is any process (a shell, an agent, this command) standing inside this folder? */
+export function inUse(dir) {
+  let ids = []; try { ids = readdirSync('/proc').filter(n => /^\d+$/.test(n)); } catch { return false; }
+  for (const id of ids) { try { const c = readlinkSync(`/proc/${id}/cwd`); if (c === dir || c.startsWith(dir + '/')) return true; } catch {} }
+  return false;
+}
+
+/** Close a lane: its last state stays in Z (checkpoint) and its folder goes — unless someone is standing in it,
+ *  then the folder is left (marked closed) for the auto-saver to tidy once nobody is. Never removes the folder
+ *  if its state can't be kept. */
 export function closeLane(p, l, status = 'dropped', receipt = null) {
   return withLock(p.z, () => {
     const cur = getLane(p, l.id);
     if (cur.status !== 'open') throw new Error(`lane ${cur.id} is already ${cur.status}`);
     if (laneAlive(cur)) putFiles(p, cur, 'checkpoint', laneNow(p, cur)); // throws (and keeps the folder) if it can't be read
-    putMeta(p, { ...cur, status, closedAt: Date.now(), receipt });
-    if (laneAlive(cur)) rmSync(cur.path, { recursive: true, force: true });
+    const leave = laneAlive(cur) && inUse(cur.path);
+    putMeta(p, { ...cur, status, closedAt: Date.now(), receipt, folderLeft: leave });
+    if (laneAlive(cur) && !leave) rmSync(cur.path, { recursive: true, force: true });
+    return { folderLeft: leave };
   });
+}
+
+/** Remove folders of closed lanes that were left because someone stood in them — once nobody does, and only
+ *  if nothing in them changed after the lane closed (otherwise they stay, flagged). */
+export function tidyLanes(p) {
+  return withLock(p.z, () => listLanes(p, { all: true }).filter(l => l.status !== 'open' && l.folderLeft).map(l => {
+    if (!laneAlive(l)) { putMeta(p, { ...l, folderLeft: false }); return { id: l.id, removed: false }; }
+    if (inUse(l.path)) return { id: l.id, removed: false, inUse: true };
+    const d = diff(filesOf(p, l, 'checkpoint'), laneNow(p, l));
+    if (d.added.length + d.changed.length + d.removed.length) {
+      if (!l.changedAfterClose) putMeta(p, { ...l, changedAfterClose: true });
+      return { id: l.id, removed: false, changedAfterClose: true };
+    }
+    rmSync(l.path, { recursive: true, force: true }); putMeta(p, { ...l, folderLeft: false });
+    return { id: l.id, removed: true };
+  }));
 }
 
 /** One line per open lane, for the project view and the arrival brief. */
@@ -257,9 +285,10 @@ export function laneLines(p) {
 
 export function laneCli({ cmd, rest, flags, who, out, fail, here }) {
   const inLane = laneHere();
+  const closedNote = L => `lane ${L.lane.id} is already ${L.lane.status}${L.lane.receipt ? ` (${L.lane.receipt})` : ''}; this folder was only left because a shell was in it. Work in Y: cd ${L.p.y}  — or start a new lane`;
   switch (cmd) {
     case 'lane': {
-      if (inLane) fail(`you're already in lane ${inLane.lane.id}; land it first (xyz land) or work in it`);
+      if (inLane && inLane.lane.status === 'open') fail(`you're already in lane ${inLane.lane.id}; land it first (xyz land) or work in it`);
       const why = rest.join(' ').trim(); if (!why) fail('say what the lane is for: xyz lane "team sharing"');
       const p = here(null), l = startLane(p, { why, who });
       return out(l, `Lane ${l.id} is yours: ${l.files} files, copied from Y as it is right now.\n  Work here: ${l.path}\n  Keep it safe as you go: xyz save "why"  (the auto-saver also keeps it)\n  When done:  xyz land   (merges into Y in order; clashes come back to you marked)`);
@@ -271,22 +300,22 @@ export function laneCli({ cmd, rest, flags, who, out, fail, here }) {
     case 'land': {
       if (!inLane) fail('land works inside a lane (cd into it); see lanes with: xyz lanes');
       const { p, lane } = inLane;
-      if (lane.status !== 'open') fail(`lane ${lane.id} is ${lane.status}`);
+      if (lane.status !== 'open') fail(closedNote(inLane));
       const r = land(p, lane, { why: rest.join(' ').trim(), who: flags.who || process.env.XYZ_WHO || lane.who, keep: !!flags.keep });
       if (r.nothing) return out(r, `Nothing to land: lane ${lane.id} has no changes.`);
       if (r.unresolved) { out(r, `Nothing landed: the last clash isn't settled yet.\n${r.unresolved.map(x => `  ${x}`).join('\n')}\nThen run xyz land again.`); process.exitCode = 1; return; }
       if (r.clashes.length) return out({ ...r, clashes: r.clashes.map(c => ({ file: c.rel, why: c.why ?? 'same lines changed on both sides' })) },
         `Nothing landed yet: ${r.clashes.length} file${r.clashes.length === 1 ? '' : 's'} clash with work that landed in Y first.\nYour lane now sits on top of Y as it is. To settle:\n${r.clashes.map(c => c.kind === 'text' ? `  ${c.rel} — same lines changed on both sides: fix the <<<<<<< / >>>>>>> parts` : `  ${c.rel} — ${c.why}: Y's side is in ${c.side}; keep what you want in ${c.rel}, then delete ${c.side}`).join('\n')}\nThen run xyz land again.`);
-      return out(r, `${lane.id} landed in Y: ${r.landed.length} file${r.landed.length === 1 ? '' : 's'}${r.receipt ? ` · receipt ${r.receipt.id}` : ' (Y already had them)'}.\n${r.kept ? '  The lane stays open on top of Y.' : `  The lane is closed (its last state is kept in Z). Carry on in Y, or start a new lane.`}${r.receipt ? `\n  Undo with: xyz undo ${r.receipt.id}` : ''}`);
+      return out(r, `${lane.id} landed in Y: ${r.landed.length} file${r.landed.length === 1 ? '' : 's'}${r.receipt ? ` · receipt ${r.receipt.id}` : ' (Y already had them)'}.\n${r.kept ? '  The lane stays open on top of Y.' : r.folderLeft ? `  The lane is closed (its last state is kept in Z). Your shell is standing in it, so the folder stays until you leave;\n  the auto-saver tidies it away after. Carry on in Y: cd ${p.y}` : `  The lane is closed (its last state is kept in Z). Carry on in Y (${p.y}), or start a new lane.`}${r.receipt ? `\n  Undo with: xyz undo ${r.receipt.id}` : ''}`);
     }
     case 'drop': {
       if (!inLane && !rest[0]) fail('drop works inside a lane, or name it: xyz drop L2 --yes');
       const p = inLane?.p ?? here(null);
       const l = rest[0] ? getLane(p, rest[0]) : inLane.lane;
-      if (l.status !== 'open') fail(`lane ${l.id} is already ${l.status}`);
+      if (l.status !== 'open') fail(inLane && !rest[0] ? closedNote(inLane) : `lane ${l.id} is already ${l.status}`);
       if (!flags.yes) fail(`this closes lane ${l.id} without landing it (its last state stays in Z). Add --yes to do it.`);
-      closeLane(p, l, 'dropped');
-      return out({ dropped: l.id }, `Lane ${l.id} closed without landing. Its last state is kept in Z/lanes/${l.id}.`);
+      const c = closeLane(p, l, 'dropped');
+      return out({ dropped: l.id, folderLeft: c.folderLeft }, `Lane ${l.id} closed without landing. Its last state is kept in Z/lanes/${l.id}.${c.folderLeft ? `\n  Someone is standing in its folder, so it stays until they leave (the auto-saver tidies it). Y: ${p.y}` : ''}`);
     }
   }
 }

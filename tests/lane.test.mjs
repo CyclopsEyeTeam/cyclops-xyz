@@ -50,7 +50,10 @@ test('lanes land in order, merge on top of each other, and each receipt has only
   assert.match(rb.title, /L2 landed: pixel bits/);
   // the third agent's unsaved README is still theirs: still unsaved, still in Y
   assert.match(xyz(root, ['TeamApp'], { cwd: y }).out, /~ README\.md/);
-  assert.ok(!existsSync(a.path) && !existsSync(b.path), 'landed lanes close');
+  assert.ok(existsSync(a.path), 'landed from inside: the folder stays while a shell stands in it');
+  assert.match(xyz(root, ['save', 'more'], { cwd: a.path }).out, /already landed[\s\S]*cd /);
+  assert.equal(xyz(root, ['watch']).code, 0);
+  assert.ok(!existsSync(a.path) && !existsSync(b.path), 'the auto-saver tidies landed lanes once nobody is in them');
   assert.match(xyz(root, ['lanes', '--all'], { cwd: y }).out, /L1\s+landed[\s\S]*L2\s+landed/);
 });
 
@@ -99,7 +102,10 @@ test('inside a lane: save keeps it in Z, Y-only commands are refused, drop needs
   assert.match(xyz(root, ['lane', 'again'], { cwd: a.path }).out, /already in lane L1/);
   assert.match(xyz(root, ['drop'], { cwd: a.path }).out, /--yes/);
   assert.equal(xyz(root, ['drop', '--yes'], { cwd: a.path }).code, 0);
-  assert.ok(!existsSync(a.path));
+  assert.match(xyz(root, ['lane', 'fresh start', '--who', 'claude-a'], { cwd: a.path }).out, /Lane L2 is yours/, 'a closed lane\'s folder doesn\'t block a new lane');
+  writeFileSync(join(a.path, 'src', 'b.js'), 'typed after it closed\n');
+  xyz(root, ['watch']);
+  assert.ok(existsSync(a.path), 'changes made after closing are never tidied away');
   const kept = JSON.parse(readFileSync(join(root, 'TeamApp', 'Z', 'lanes', 'L1', 'checkpoint.json'), 'utf8'));
   assert.ok(kept['src/b.js'], 'the dropped lane\'s last state stays in Z');
   assert.equal(readFileSync(join(y, 'src', 'b.js'), 'utf8'), 'b\n');
@@ -190,4 +196,16 @@ test('dependency folders in Y are never deleted by a landing after a clash', () 
   writeFileSync(join(b.path, 'src', 'a.js'), 'A and B\n');
   assert.equal(xyz(root, ['land'], { cwd: b.path }).code, 0);
   assert.equal(readFileSync(join(y, 'dist', 'out.js'), 'utf8'), 'built');
+});
+
+test('landing from inside a lane leaves the folder (so the shell keeps working) and says where Y is', () => {
+  const { root, y } = project();
+  const a = lane(root, y, 'one', 'claude-a');
+  writeFileSync(join(a.path, 'src', 'b.js'), 'A\n');
+  const r = xyz(root, ['land'], { cwd: a.path });
+  assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`cd ${y}`));
+  assert.ok(existsSync(a.path));
+  assert.match(xyz(root, ['arrive'], { cwd: a.path }).out, /lane L1's old folder/);
+  const fromY = lane(root, y, 'two', 'claude-a'); writeFileSync(join(fromY.path, 'src', 'b.js'), 'A2\n');
+  assert.equal(xyz(root, ['land'], { cwd: fromY.path }).code, 0);
 });

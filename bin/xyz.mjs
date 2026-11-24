@@ -79,6 +79,7 @@ async function main() {
   if (['save', 'promote', 'rollback', 'undo', 'try', 'receipts', 'show'].includes(cmd)) {
     const { laneHere, checkpoint } = await import('../src/lane.mjs');
     const L = laneHere();
+    if (L && L.lane.status !== 'open' && ['save', 'promote', 'rollback', 'undo', 'try'].includes(cmd)) fail(`lane ${L.lane.id} is already ${L.lane.status}${L.lane.receipt ? ` (${L.lane.receipt})` : ''}; this folder was only left because a shell was in it. Work in Y: cd ${L.p.y}`);
     if (L && cmd === 'save') {
       const why = rest.join(' ').trim(), n = checkpoint(L.p, L.lane, why || null);
       return out({ lane: L.lane.id, changed: n }, `Kept lane ${L.lane.id} in Z: ${n} file${n === 1 ? '' : 's'} changed from where it started.\n  When it's done: xyz land`);

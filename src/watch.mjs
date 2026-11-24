@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { allHomes, openProject, readConfig } from './project.mjs';
 import { save } from './save.mjs';
 import { refreshMap, mapStale } from './map.mjs';
-import { listLanes, checkpoint } from './lane.mjs';
+import { listLanes, checkpoint, tidyLanes } from './lane.mjs';
 
 export function watchOnce({ who = 'xyz-watch' } = {}) {
   return allHomes().map(h => {
@@ -12,6 +12,7 @@ export function watchOnce({ who = 'xyz-watch' } = {}) {
       const p = openProject(h), receipt = save(p, { kind: 'auto', who });
       // keep the map fresh; a map that can't be written never stops the saver
       for (const l of listLanes(p)) { try { checkpoint(p, l); } catch {} } // lanes are kept safe too
+      try { tidyLanes(p); } catch {}
       let map = false; try { if (receipt || mapStale(p)) map = refreshMap(p); } catch {}
       return { project: name, receipt, map };
     }

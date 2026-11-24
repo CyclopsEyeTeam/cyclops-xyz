@@ -19,7 +19,8 @@ export function arriveCli({ query, flags, out, fail }) {
     let here = null; try { here = laneHere(); } catch {}
     let text = arrive(p, { unsaved, live });
     const extra = [];
-    if (here) extra.push(`▸ You are in lane ${here.lane.id} ("${here.lane.why}", ${here.lane.who}). Work here; \`xyz land\` merges it into Y in order.`);
+    if (here && here.lane.status !== 'open') extra.push(`▸ This is lane ${here.lane.id}'s old folder: it was already ${here.lane.status}. Work in Y (cd ${p.y}) or start a new lane.`);
+    else if (here) extra.push(`▸ You are in lane ${here.lane.id} ("${here.lane.why}", ${here.lane.who}). Work here; \`xyz land\` merges it into Y in order.`);
     if (lanes.length) extra.push(`▸ Open lanes (other agents at work)\n${lanes.join('\n')}`);
     extra.push(here ? '' : 'Working alongside other agents? Take your own lane first: xyz lane "what for" — then xyz land when done.');
     text = text.replace(/\n\nWhen you finish a piece:/, `\n\n${extra.filter(Boolean).join('\n\n')}\n\nWhen you finish a piece:`);
