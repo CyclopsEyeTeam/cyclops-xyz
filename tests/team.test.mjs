@@ -71,3 +71,20 @@ test('a long promote check never holds the project: others save meanwhile; --wai
   assert.match(xyz(root, ['save', 'x', '--wait=soon'], { cwd: y }).out, /--wait takes a time/);
   assert.equal(xyz(root, ['save', 'x', '--wait=2m'], { cwd: y }).code, 0);
 });
+
+test('a check run on the saved copy finds the project like in Y, and xyz status there answers for the copy', () => {
+  const { root, y } = project();
+  const check = `set -e; home=$(cat .xyz); test "$XYZ_CHECK_COPY" = 1; test "$XYZ_HOME" = "$home"; mkdir -p "$home/Z/checks"; echo ran > "$home/Z/checks/last.log";
+    clean() { "${process.execPath}" "${BIN}" status --json | "${process.execPath}" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const u=JSON.parse(s).unsaved;process.exit([...u.added,...u.changed,...u.removed].length?1:0)})'; }
+    clean; if [ -f make-mess ]; then echo mess > a.txt; fi; clean`;
+  const cfg = join(root, 'Crew', 'xyz.json'); writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), check }));
+  writeFileSync(join(y, 'b.txt'), 'other agent, unsaved\n'); // must not count against the copy
+  const env = { XYZ_RAM: join(root, '.ram') };
+  const r = xyz(root, ['promote', '--saved'], { cwd: y, env });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(readFileSync(join(root, 'Crew', 'Z', 'checks', 'last.log'), 'utf8'), 'ran\n');
+  writeFileSync(join(y, 'make-mess'), ''); xyz(root, ['save', 'mess switch'], { cwd: y });
+  const bad = xyz(root, ['promote', '--saved'], { cwd: y, env });
+  assert.equal(bad.code, 1, 'a check that changes the copy is caught by status inside the copy');
+  assert.match(bad.out, /check failed on the saved copy/);
+});

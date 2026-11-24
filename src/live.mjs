@@ -48,7 +48,7 @@ export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
   const version = snap.id, dir = join(p.x, 'versions', version);
   const fail = (c, where) => new Error(`check failed${where} ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
   if (p.config.check && !exact) {
-    const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, encoding: 'utf8', maxBuffer: 64 << 20 });
+    const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, env: { ...process.env, XYZ_HOME: p.home, XYZ_VERSION: version, XYZ_Y: p.y }, encoding: 'utf8', maxBuffer: 64 << 20 });
     if (c.status !== 0) throw fail(c, '');
   }
   // build the version outside the lock (snapshots and blobs never change); its own tmp folder per process
@@ -62,8 +62,11 @@ export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
     mkdirSync(tmp, { recursive: true });
     for (const d of p.config.deps ?? []) if (existsSync(join(p.y, d))) cpSync(join(p.y, d), join(tmp, d), { recursive: true, verbatimSymlinks: true });
     writeAtomic(join(tmp, '.xyz-version'), JSON.stringify({ version, at: Date.now(), from: p.y }) + '\n');
+    writeAtomic(join(tmp, '.xyz'), p.home + '\n'); // scripts find the project (and Z) as they would in Y
     if (p.config.check && exact) {
-      const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, encoding: 'utf8', maxBuffer: 64 << 20 });
+      // inside the copy, `xyz status` answers for the copy: is it still exactly the saved state?
+      const env = { ...process.env, XYZ_HOME: p.home, XYZ_CHECK_COPY: '1', XYZ_VERSION: version, XYZ_Y: p.y };
+      const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, env, encoding: 'utf8', maxBuffer: 64 << 20 });
       if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw fail(c, ' on the saved copy'); }
     }
   }

@@ -1,8 +1,9 @@
 // What people see: one project on one screen, and the list of all projects.
 import { existsSync, readFileSync, readlinkSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
+import { scan, diff } from './scan.mjs';
 import { listReceipts, when } from './receipts.mjs';
-import { changesNow } from './save.mjs';
+import { changesNow, loadSnapshot } from './save.mjs';
 import { allHomes, openProject } from './project.mjs';
 import { laneLines } from './lane.mjs';
 
@@ -16,16 +17,33 @@ export function liveInfo(p) {
   return { current, label, since: h?.at ?? null, receipt: h?.receipt ?? null, servicesFromX: !!p.config.servicesFromX, services: p.config.services };
 }
 
+/** A promoted (or being-checked) copy of a saved state that cwd is inside, for this project: { dir, version } or null. */
+export function copyHere(p, cwd = process.cwd()) {
+  for (let d = resolve(cwd); d.startsWith(p.x + '/'); d = dirname(d)) {
+    try { const v = JSON.parse(readFileSync(join(d, '.xyz-version'), 'utf8')); return { dir: d, version: v.version }; } catch {}
+  }
+  return null;
+}
+
+/** Inside a copy: what differs from the saved state it was built from (e.g. files a check wrote into the tree). */
+function copyChanges(p, c) {
+  const snap = loadSnapshot(p.z, c.version);
+  const { files, unreadable } = scan(c.dir, p.z, { skip: [...(p.config.skip ?? []), '.xyz-version', ...(p.config.deps ?? [])], prev: snap.files });
+  return { ...diff(snap.files, files), unreadable };
+}
+
 export function projectInfo(p) {
+  const copy = copyHere(p);
   let about = '';
   try { about = readFileSync(join(p.z, 'NOTES.md'), 'utf8').split(/\n\s*\n/).map(s => s.trim()).find(s => s && !s.startsWith('#')) ?? ''; } catch {}
-  let unsaved; try { const c = changesNow(p); unsaved = { added: c.added, removed: c.removed, changed: c.changed, unreadable: c.unreadable }; } catch (e) { unsaved = { error: e.message }; }
-  return { name: p.name, about, places: { X: p.x, Y: p.y, Z: p.z, notes: join(p.z, 'NOTES.md') }, live: liveInfo(p), unsaved, receipts: listReceipts(p.z, 5), lastTry: lastLine(join(p.z, 'tries.jsonl')), settings: p.config };
+  let unsaved; try { const c = copy ? copyChanges(p, copy) : changesNow(p); unsaved = { added: c.added, removed: c.removed, changed: c.changed, unreadable: c.unreadable }; } catch (e) { unsaved = { error: e.message }; }
+  return { name: p.name, ...(copy ? { copy: { dir: copy.dir, version: copy.version, note: 'unsaved = differences from the saved state this copy was built from' } } : {}), about, places: { X: p.x, Y: p.y, Z: p.z, notes: join(p.z, 'NOTES.md') }, live: liveInfo(p), unsaved, receipts: listReceipts(p.z, 5), lastTry: lastLine(join(p.z, 'tries.jsonl')), settings: p.config };
 }
 
 export function projectView(p) {
   const i = projectInfo(p), L = [];
   L.push(`━━ ${i.name} ━━`);
+  if (i.copy) L.push(`(You are in a saved copy, ${i.copy.version}: "unsaved" below means changed since it was built.)`);
   if (i.about) L.push(i.about.replace(/\s+/g, ' ').slice(0, 400));
   L.push('', `X: ${i.places.X}   (live)`, `Y: ${i.places.Y}   (source — work here)`, `Z: ${i.places.Z}   (memory — notes: Z/NOTES.md)`, '');
   const lv = i.live;
