@@ -31,7 +31,9 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz test [files]         run the project's tests side by side; files unchanged since they passed count from the buffer
                            (--full, --bail, --jobs N, --log FILE; set up in xyz.json "tests", see xyz help test)
   xyz promote              check Y, then make it the live version in X
-                           (--saved: only what's kept, checked on that copy · xyz promote r-0042: that receipt's state)
+                           (--saved: only what's kept, checked on that copy · xyz promote r-0042: that receipt's state
+                            · xyz promote L7, or xyz promote inside a lane: what's live + only that lane's work)
+                           One check runs at a time per project; the others wait their turn and say who they wait for.
   xyz rollback             go back to the previous live version
   xyz changed              every unsaved file in Y and who last edited it
   xyz watch                save every project that changed (the auto-saver runs this every 15 min)
@@ -47,7 +49,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours']);
+const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours', 'no-wait']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
@@ -87,7 +89,12 @@ async function main() {
       const why = rest.join(' ').trim(), n = checkpoint(L.p, L.lane, why || null);
       return out({ lane: L.lane.id, changed: n }, `Kept lane ${L.lane.id} in Z: ${n} file${n === 1 ? '' : 's'} changed from where it started.\n  When it's done: xyz land`);
     }
-    if (L && ['promote', 'rollback', 'undo', 'try'].includes(cmd)) fail(`you're in lane ${L.lane.id}: land it first (xyz land), then ${cmd} from Y`);
+    if (L && cmd === 'promote') {
+      // inside a lane: X = what's live + only this lane's work, checked on that copy
+      if (rest[0] || flags.saved) fail(`inside lane ${L.lane.id}, xyz promote makes this lane's work live; run other promotes from Y`);
+      const { promoteCli } = await import('../src/live.mjs'); return promoteCli({ p: L.p, rest, flags, who: who(), out, fail, lane: L.lane });
+    }
+    if (L && ['rollback', 'undo', 'try'].includes(cmd)) fail(`you're in lane ${L.lane.id}: land it first (xyz land), then ${cmd} from Y`);
   }
   switch (cmd) {
     case undefined: case 'status': {

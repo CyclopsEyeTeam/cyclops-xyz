@@ -3,11 +3,13 @@ import { mkdirSync, existsSync, readlinkSync, symlinkSync, renameSync, readFileS
 import { join, basename, dirname } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { withLock } from './lock.mjs';
-import { save, latestSnapshot, loadSnapshot } from './save.mjs';
+import { save, latestSnapshot, loadSnapshot, writeSnapshot } from './save.mjs';
+import * as LANE from './lane.mjs';
 import { getReceipt } from './receipts.mjs';
 import { getBlob } from './store.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { nextId, writeReceipt } from './receipts.mjs';
+import { takeTurn } from './queue.mjs';
 
 const current = p => { try { return basename(readlinkSync(join(p.x, 'current'))); } catch { return null; } };
 /** Plain number of a version: v1 is the first one ever promoted. */
@@ -36,9 +38,22 @@ function receipt(p, who, kind, title, why, snapshot, before) {
  *  and run the check on that exact copy instead of on Y. from: a receipt id whose snapshot to promote.
  *  The project lock is held only to pick what to promote and to switch X — never during the check, which
  *  can take a long time — so other agents can keep saving and landing meanwhile. */
-export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
-  const exact = saved || from;
+export function promote(p, { who = 'agent', saved = false, from = null, lane = null, force = false } = {}) {
+  const exact = saved || from || lane;
+  let laneInfo = null, baseLabel = null;
   const snap = withLock(p.z, () => {
+    if (lane) {
+      // X = what is live now + only this lane's changes, as its own snapshot (Y's head is left alone)
+      const { laneOnLive } = LANE;
+      const cur = current(p), live = cur ? loadSnapshot(p.z, cur).files : null;
+      laneInfo = laneOnLive(p, lane, live);
+      baseLabel = cur ? `v${versionNumber(p, cur)}` : 'Y where the lane started';
+      const id = writeSnapshot(p.z, laneInfo.files, Date.now(), { head: false, note: `${laneInfo.lane.id} on top of ${baseLabel}` });
+      return loadSnapshot(p.z, id);
+    }
+    // a lane whose work is live but not landed: promoting Y (which doesn't have it yet) would take it back out
+    const waiting = LANE.liveNotLanded(p);
+    if (waiting.length && !force) throw new Error(`${waiting.map(l => `${l.id} (${l.who})`).join(', ')} ${waiting.length === 1 ? 'is' : 'are'} live but not landed in Y yet, so promoting Y would take that work back out of X. Land ${waiting.length === 1 ? 'it' : 'them'} first (xyz land in the lane), promote the lane again, or add --yes to promote Y anyway.`);
     if (!exact) save(p, { kind: 'auto', who, why: 'before promote' });
     let s = latestSnapshot(p.z);
     if (from) { const r = getReceipt(p.z, from); if (!r.snapshot) throw new Error(`${r.id} has no saved state to promote`); s = loadSnapshot(p.z, r.snapshot); }
@@ -47,8 +62,10 @@ export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
   });
   const version = snap.id, dir = join(p.x, 'versions', version);
   const fail = (c, where) => new Error(`check failed${where} ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
+  const what = lane ? `promote ${lane.id}` : from ? `promote ${from}` : 'promote';
   if (p.config.check && !exact) {
-    const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, env: { ...process.env, XYZ_HOME: p.home, XYZ_VERSION: version, XYZ_Y: p.y }, encoding: 'utf8', maxBuffer: 64 << 20 });
+    const done = takeTurn(p, { label: what, who });
+    let c; try { c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, env: { ...process.env, XYZ_HOME: p.home, XYZ_VERSION: version, XYZ_Y: p.y, XYZ_IN_TURN: p.home }, encoding: 'utf8', maxBuffer: 64 << 20 }); } finally { done(); }
     if (c.status !== 0) throw fail(c, '');
   }
   // build the version outside the lock (snapshots and blobs never change); its own tmp folder per process
@@ -65,9 +82,10 @@ export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
     writeAtomic(join(tmp, '.xyz'), p.home + '\n'); // scripts find the project (and Z) as they would in Y
     if (p.config.check && exact) {
       // inside the copy, `xyz status` answers for the copy: is it still exactly the saved state?
-      const env = { ...process.env, XYZ_HOME: p.home, XYZ_CHECK_COPY: '1', XYZ_VERSION: version, XYZ_Y: p.y };
-      const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, env, encoding: 'utf8', maxBuffer: 64 << 20 });
-      if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw fail(c, ' on the saved copy'); }
+      const env = { ...process.env, XYZ_HOME: p.home, XYZ_CHECK_COPY: '1', XYZ_VERSION: version, XYZ_Y: p.y, XYZ_IN_TURN: p.home }; // the check runs in this promote's turn
+      const done = takeTurn(p, { label: what, who });
+      let c; try { c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, env, encoding: 'utf8', maxBuffer: 64 << 20 }); } finally { done(); }
+      if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw fail(c, lane ? ` on ${lane.id}'s copy` : ' on the saved copy'); }
     }
   }
   return withLock(p.z, () => {
@@ -76,7 +94,9 @@ export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
     const n = versionNumber(p, version), was = before ? ` (was v${versionNumber(p, before)})` : '';
     switchTo(p, version);
     const rs = restart(p);
-    const r = receipt(p, who, 'promote', `Made v${n} live`, `Promoted ${from ? `${from}'s state` : exact ? 'what was kept' : 'Y'} to X as v${n}${was}; ${rs.text}`, version, before);
+    const what = laneInfo ? `lane ${laneInfo.lane.id} (${laneInfo.lane.who}, "${laneInfo.lane.why}": ${laneInfo.touched.length} file${laneInfo.touched.length === 1 ? '' : 's'}) on top of ${baseLabel}` : from ? `${from}'s state` : exact ? 'what was kept' : 'Y';
+    const r = receipt(p, who, 'promote', laneInfo ? `Made v${n} live from ${laneInfo.lane.id}` : `Made v${n} live`, `Promoted ${what} to X as v${n}${was}; ${rs.text}${laneInfo ? `. Y doesn't have it until ${laneInfo.lane.id} lands` : ''}`, version, before);
+    if (laneInfo) LANE.markLaneLive(p, laneInfo.lane.id, { version, receipt: r.id, at: r.at });
     appendFileSync(join(p.x, 'history.jsonl'), JSON.stringify({ at: r.at, kind: 'promote', version, before, receipt: r.id }) + '\n');
     return { ...r, label: `v${n}`, restartFailed: !rs.ok };
   });
@@ -98,5 +118,8 @@ export function rollback(p, { who = 'agent' } = {}) {
   });
 }
 
-export function promoteCli({ p, who, out, rest = [], flags = {} }) { const r = promote(p, { who, saved: !!flags.saved, from: rest[0] ?? null }); out(r, `Live now: ${r.label}\n  ${r.why}\n  Go back with: xyz rollback`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }
+export function promoteCli({ p, who, out, rest = [], flags = {}, lane = null }) {
+  const arg = rest[0] ?? null;
+  if (!lane && arg && /^L\d+$/i.test(arg)) lane = LANE.getLane(p, arg.toUpperCase());
+  const r = promote(p, { who, saved: !!flags.saved, from: lane ? null : arg, lane, force: !!flags.yes }); out(r, `Live now: ${r.label}\n  ${r.why}\n  Go back with: xyz rollback`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }
 export function rollbackCli({ p, who, out }) { const r = rollback(p, { who }); out(r, `Live now: ${r.label}\n  ${r.why}`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }

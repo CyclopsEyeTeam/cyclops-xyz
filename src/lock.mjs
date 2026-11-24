@@ -7,12 +7,13 @@ import { randomBytes } from 'node:crypto';
 
 const held = new Map(); // zDir -> { depth, token }
 const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const startOf = pid => { try { return readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ')[19]; } catch { return null; } };
+export const startOf = pid => { try { return readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ')[19]; } catch { return null; } };
 const MY_START = startOf(process.pid);
 
-function gone(holder) {
+export function gone(holder) {
   if (!holder?.pid) return false;
   try { process.kill(holder.pid, 0); } catch (e) { if (e.code !== 'EPERM') return true; }
+  try { if (readFileSync(`/proc/${holder.pid}/stat`, 'utf8').split(') ')[1][0] === 'Z') return true; } catch {} // finished, not yet reaped
   return holder.start != null && startOf(holder.pid) !== holder.start; // same pid, different program
 }
 

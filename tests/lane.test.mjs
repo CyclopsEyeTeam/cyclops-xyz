@@ -98,7 +98,7 @@ test('inside a lane: save keeps it in Z, Y-only commands are refused, drop needs
   const s = xyz(root, ['save', 'halfway'], { cwd: a.path });
   assert.equal(s.code, 0, s.out); assert.match(s.out, /Kept lane L1 in Z: 1 file/);
   assert.equal(receipts(root, y).length, 1, 'a lane save makes no receipt in Y');
-  assert.match(xyz(root, ['promote'], { cwd: a.path }).out, /land it first/);
+  assert.match(xyz(root, ['rollback'], { cwd: a.path }).out, /land it first/); // promote inside a lane now makes the lane live (lanelive.test)
   assert.match(xyz(root, ['lane', 'again'], { cwd: a.path }).out, /already in lane L1/);
   assert.match(xyz(root, ['drop'], { cwd: a.path }).out, /--yes/);
   assert.equal(xyz(root, ['drop', '--yes'], { cwd: a.path }).code, 0);

@@ -38,9 +38,11 @@
 // - The latest whole-suite run goes to Z/tests/last.json (and last-check.json for promote's check), which `xyz arrive`
 //   and `xyz lanes` show.
 // - --full (or XYZ_TEST_FULL=1) ignores the buffer and refills it.
-// - It shares the machine: with no --jobs/XYZ_TEST_JOBS it starts fewer jobs when the load is already high, waits (up
+// - It shares the machine: with no --jobs/XYZ_TEST_JOBS it decides before every file how many may run (cores minus the
+//   load that isn't its own), waits (up
 //   to 10 min, XYZ_TEST_QUIET_WAIT_S) for the load to drop below the core count before each alone re-judge, and names
-//   the load on every failure (FAIL line, last.json failedLoad), so a failure under load reads as one.
+//   the load on every failure (FAIL line, last.json failedLoad), so a failure under load reads as one. A file that
+//   fails alone on a busy machine gets one more try once it is quiet before it counts as failed.
 // - memoryMax runs the whole thing in a memory-capped systemd scope, when one is to be had.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -48,6 +50,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { RECORDER_IMPORT, RECORDER_URL } from './footprint.mjs';
+import { takeTurn } from './queue.mjs';
 
 const VERSION = 2;
 
@@ -346,16 +349,27 @@ export async function testCli({ p, rest, flags, who, fail }) {
   for (const f of s.files) if (!fs.existsSync(path.join(root, f))) fail(`no test file ${f} in ${root}`);
   if (!['node', 'strace', 'none'].includes(s.recorder)) fail(`xyz.json tests.recorder is "${s.recorder}"; it can be "node", "strace" or "none"`);
   if (s.recorder === 'strace' && spawnSync('strace', ['-V'], { stdio: 'ignore' }).status !== 0) fail('tests.recorder is "strace" but strace is not installed (sudo apt install strace), or use "node" / "none"');
+  // one full suite at a time per project (a promote's own check already holds the turn); spot checks don't wait
+  // XYZ_VERSION is set only for a promote's own check, which already holds the turn
+  const giveBack = sameFiles(s.files, s.all) && !flags['no-wait'] && !process.env.XYZ_VERSION ? takeTurn(p, { label: `xyz test${s.full ? ' --full' : ''} in ${path.basename(root)}`, who }) : () => {};
+  try { await runSuite(s, { p, flags, who, fail }); } finally { giveBack(); }
+}
+
+async function runSuite(s, { p, flags, who, fail }) {
+  const root = s.root;
   const scoped = inMemoryScope(s);
   if (scoped !== null) { process.exitCode = scoped; return; }
 
   const { toKey, fromKey } = keyer(root);
   const salt = saltOf(s);
-  let jobsNote = '';
-  if (!s.jobsAsked && s.jobs > 1) {
-    const fit = Math.max(1, Math.min(s.jobs, Math.floor(CORES - load())));
-    if (fit < s.jobs) { jobsNote = ` (fewer: the machine is busy, ${loadText()})`; s.jobs = fit; }
-  }
+  // How many files may run now: decided again before every start, so a busy start widens as the machine quietens
+  // and narrows when another agent's suite begins. Our own running files are taken out of the load first.
+  // An explicit --jobs / XYZ_TEST_JOBS is obeyed as given.
+  const maxJobs = s.jobs;
+  let running = new Set();
+  const jobsNow = () => s.jobsAsked ? maxJobs : Math.max(1, Math.min(maxJobs, Math.floor(CORES - Math.max(0, load() - running.size))));
+  const startJobs = jobsNow();
+  const jobsNote = s.jobsAsked || maxJobs === 1 ? '' : startJobs < maxJobs ? ` (${startJobs} for now: the machine is busy, ${loadText()}; more as it quietens)` : ', fewer if the machine gets busy';
   const buffer = loadBuffer(s.buffer);
   const prints = new Prints(fromKey);
   const maxAgeMs = s.maxAgeHours * 3600_000;
@@ -374,12 +388,11 @@ export async function testCli({ p, rest, flags, who, fail }) {
   const expected = (f) => buffer.durations[f] ?? 30_000; // an unknown file starts early, in case it is a long one
   const together = toRun.filter((t) => !buffer.alone[t.file]).sort((a, b) => expected(b.file) - expected(a.file));
   const alone = toRun.filter((t) => buffer.alone[t.file]);
-  say(`# xyz test: ${s.files.length} files — ${fromBuffer.length} from the buffer, ${toRun.length} to run (${together.length} side by side on ${s.jobs} jobs${jobsNote}, ${alone.length} alone)`);
+  say(`# xyz test: ${s.files.length} files — ${fromBuffer.length} from the buffer, ${toRun.length} to run (${together.length} side by side on up to ${maxJobs} job${maxJobs === 1 ? '' : 's'}${jobsNote}, ${alone.length} alone)`);
   for (const t of toRun.slice(0, 40)) say(`#   run ${t.file}: ${t.reason}`);
   if (toRun.length > 40) say(`#   ...and ${toRun.length - 40} more`);
 
   const results = new Map(); // file -> { ok, summary, loadSensitive }
-  const running = new Set();
   const retry = []; // failed beside others: judged alone
   let index = 0;
   let paused = false; // --bail: start nothing new beside others until the failures are judged alone
@@ -418,6 +431,8 @@ export async function testCli({ p, rest, flags, who, fail }) {
     const summary = summaryOf(text);
     const ok = code === 0 && summary.fail === 0 && !interrupted;
     if (log !== null) fs.writeSync(log, `# xyz test: ${task.file}${isAlone ? ' (alone)' : ''}\n${text}`);
+    // stopped by an interrupt: neither a pass nor a failure; it counts as not run
+    if (interrupted && !ok) return;
     if (ok) {
       const notKept = keep(task.file, run, summary);
       const loadSensitive = isAlone && task.failedTogether;
@@ -426,11 +441,16 @@ export async function testCli({ p, rest, flags, who, fail }) {
       const line = `ok   ${task.file} (${((summary.ms || Date.now() - run.started) / 1000).toFixed(1)}s, ${summary.tests} tests${loadSensitive ? ', failed beside others, passed alone' : ''}${notKept ? `; not buffered: ${notKept}` : ''})`;
       if (loadSensitive) say(line); else note(line);
       progress();
-    } else if (!isAlone && !interrupted && s.jobs > 1) {
+    } else if (!isAlone && !interrupted && maxJobs > 1) {
       task.failedTogether = true;
       retry.push(task);
       say(`again ${task.file} failed beside others (exit ${code}, ${summary.fail} failing); it runs again alone`);
       if (s.bail) paused = true;
+    } else if (!interrupted && !task.secondTry && load() >= CORES) {
+      // failed alone, but on a busy machine: one more try once it is quiet before it counts as a failure
+      task.secondTry = true;
+      retry.push(task);
+      say(`again ${task.file} failed alone at ${loadText()}; one more try once the machine is quiet`);
     } else {
       mine.entries[task.file] = null; mine.dropped[task.file] = Date.now();
       results.set(task.file, { ok: false, summary, output: run.output, load: Number(load().toFixed(1)) });
@@ -458,7 +478,7 @@ export async function testCli({ p, rest, flags, who, fail }) {
     paused = false;
     await new Promise((resolve) => {
       const next = () => {
-        while (!halted && !paused && running.size < s.jobs && together.length) {
+        while (!halted && !paused && running.size < jobsNow() && together.length) {
           const task = together.shift();
           const run = runFile(s, task.file, work, ++index);
           running.add(run);

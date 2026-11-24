@@ -143,6 +143,43 @@ function syncLane(p, l, target, mine, keepMine) {
   for (const [rel, f] of Object.entries(target)) if (!keepMine.has(rel) && !eq(mine[rel], f)) writeEntry(l.path, rel, f, p.z);
 }
 
+/** What X would be with only this lane's work added: what is live now (or Y where the lane started, if nothing is
+ *  live yet) plus the lane's own changes, merged line by line where live has moved on since the lane started.
+ *  Nothing is written to Y or the lane. Throws, naming the files, when it can't be made cleanly. */
+export function laneOnLive(p, l, live) {
+  l = getLane(p, l.id);
+  if (l.status !== 'open') throw new Error(`lane ${l.id} is ${l.status}${l.receipt ? ` (${l.receipt})` : ''}; promote Y instead`);
+  if (!laneAlive(l)) throw new Error(`lane ${l.id}'s folder is missing (${l.path}); nothing went live`);
+  const left = unresolved(l);
+  if (left.length) throw new Error(`lane ${l.id} still has clashes to settle first:\n  ${left.join('\n  ')}`);
+  const base = filesOf(p, l, 'base'), mine = laneNow(p, l);
+  if (!Object.keys(mine).length && Object.keys(base).length) throw new Error(`lane ${l.id} looks empty; refusing to make live a lane that would remove everything`);
+  const d = diff(base, mine), touched = [...d.added, ...d.changed, ...d.removed];
+  if (!touched.length) throw new Error(`lane ${l.id} has no changes yet; nothing to make live`);
+  const from = live ?? base, files = { ...from }, clashes = [];
+  for (const rel of touched) {
+    const b = base[rel], m = mine[rel], t = from[rel];
+    if (eq(t, m)) continue;
+    if (eq(t, b)) { if (m) files[rel] = m; else delete files[rel]; continue; }
+    if (b?.hash && m?.hash && t?.hash && [b, m, t].every(e => isText(getBlob(p.z, e.hash)))) {
+      const r = merge3(p.z, b, m, t, ['live', `${l.id} (${l.who})`]);
+      if (r?.clean) { files[rel] = { hash: putBlob(p.z, r.buf), mode: m.mode }; continue; }
+    }
+    clashes.push(rel);
+  }
+  if (clashes.length) throw new Error(`nothing went live: ${l.id} changes ${clashes.length === 1 ? 'a file' : `${clashes.length} files`} that also changed in what's live since the lane started (${clashes.slice(0, 5).join(', ')}${clashes.length > 5 ? ', …' : ''}). Land it into Y (xyz land), then promote Y.`);
+  return { files, touched, lane: l };
+}
+
+/** Note on the lane that its work is live (so a promote of Y, which doesn't have it yet, can warn). */
+export function markLaneLive(p, id, live) {
+  const l = getLane(p, id);
+  putMeta(p, { ...l, live: [...(l.live ?? []), live] });
+}
+
+/** Open lanes whose work is live in X but not yet landed in Y. */
+export const liveNotLanded = p => listLanes(p).filter(l => l.live?.length);
+
 /** Land a lane into Y. Lanes land one at a time (Z lock), in the order they ask. */
 export function land(p, l, { why = '', who = l.who, keep = false } = {}) {
   return withLock(p.z, () => {
@@ -281,7 +318,7 @@ export function laneLines(p) {
   return listLanes(p).map(l => {
     let n = '?'; try { n = diff(filesOf(p, l, 'base'), laneNow(p, l)); n = n.added.length + n.changed.length + n.removed.length; } catch {}
     const age = Math.round((Date.now() - l.at) / 60000);
-    return `${l.id}  ${l.who}  "${l.why}"  · ${n} file${n === 1 ? '' : 's'} changed · started ${age < 90 ? `${age} min` : `${Math.round(age / 60)} h`} ago${l.clashes?.length ? ` · ⚠ ${l.clashes.length} clash${l.clashes.length === 1 ? '' : 'es'} to fix` : ''}\n      ${l.path}`;
+    return `${l.id}  ${l.who}  "${l.why}"  · ${n} file${n === 1 ? '' : 's'} changed · started ${age < 90 ? `${age} min` : `${Math.round(age / 60)} h`} ago${l.clashes?.length ? ` · ⚠ ${l.clashes.length} clash${l.clashes.length === 1 ? '' : 'es'} to fix` : ''}${l.live?.length ? ` · live (${l.live.at(-1).receipt}), not landed in Y yet` : ''}\n      ${l.path}`;
   });
 }
 

@@ -27,10 +27,10 @@ export function latestSnapshot(z) {
   return existsSync(h) ? loadSnapshot(z, readFileSync(h, 'utf8').trim()) : null;
 }
 
-export function writeSnapshot(z, files, at = Date.now()) {
+export function writeSnapshot(z, files, at = Date.now(), { head = true, note = null } = {}) {
   const id = `s-${at}-${createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 8)}`;
-  writeAtomic(join(z, 'snapshots', `${id}.json`), JSON.stringify({ id, at, files }));
-  writeAtomic(join(z, 'head'), id);
+  writeAtomic(join(z, 'snapshots', `${id}.json`), JSON.stringify({ id, at, files, ...(note ? { note } : {}) }));
+  if (head) writeAtomic(join(z, 'head'), id); // a lane's live version is not Y's state: it leaves Y's head alone
   return id;
 }
 

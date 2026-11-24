@@ -150,6 +150,14 @@ can't be merged line by line, Y's version placed beside the lane's as `<file>.Y-
 until every clash is settled. Lanes land one at a time, in the order they ask, so the second lane always merges on top of the first.
 Each landing is one receipt signed by that agent, with only its files, and can be undone like any other.
 
+A lane can also go live on its own: `xyz promote` inside the lane (or `xyz promote L7` from anywhere) makes a
+version of what is live now plus only that lane's changes, checks that exact copy, and switches X to it. Other
+agents' work in Y doesn't ride along. Until the lane lands, Y doesn't have that work, so a plain promote of Y
+refuses (it would take it back out of X) and says which lane to land first.
+
+Promote checks and whole-suite `xyz test` runs take turns: one full check per project at a time, in the order
+they asked. A waiting one says whose check it is waiting for, and the test buffer makes the next check quick.
+
 Agents that edit Y directly can still be told apart: a Claude Code PostToolUse hook (`xyz touch --hook`,
 matcher `Edit|Write|MultiEdit|NotebookEdit`) signs each edited file, and the auto-saver then keeps one
 receipt per agent. `xyz promote --saved` makes live only what is kept, so nobody's half-done files ship.

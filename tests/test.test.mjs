@@ -84,7 +84,8 @@ test('a busy machine: fewer jobs at the start, a bounded wait for quiet before j
   const { root, y, home } = project({ 'tests/c.test.mjs': "import { test } from 'node:test'; import assert from 'node:assert';\ntest('c', () => assert.equal(1, 2));\n" });
   const env = { XYZ_TEST_LOAD: '100', XYZ_TEST_QUIET_WAIT_S: '1' };
   let r = xyz(root, ['test'], { cwd: y, env });
-  assert.match(r.out, /side by side on 1 jobs \(fewer: the machine is busy, load 100\.0/);
+  assert.match(r.out, /side by side on up to \d+ jobs? \(1 for now: the machine is busy, load 100\.0/);
+  assert.match(r.out, /failed alone at load 100\.0 .*one more try once the machine is quiet/);
   r = xyz(root, ['test', '--jobs', '2'], { cwd: y, env });
   assert.match(r.out, /waiting for the machine to quieten/);
   assert.match(r.out, /FAIL tests\/c\.test\.mjs \(exit 1, 1 failing; load 100\.0 on \d+ cores; still busy after 1s/);

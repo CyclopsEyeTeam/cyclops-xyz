@@ -30,6 +30,7 @@ version-control ceremony: never ask them about commits, staging, branches or sav
   Same lines changed on both sides are marked `<<<<<<<` / `>>>>>>>` in the file; for files that can't be merged
   line by line, Y's version sits next to yours as `<file>.Y-L2`: keep what you want, then delete that file.
   `xyz land` refuses until every clash is settled.
+- To make only your lane's work live: `xyz promote` inside the lane (live + your changes, checked on that copy). Land it afterwards so Y has it too.
 - `xyz lanes` shows who is working where. `xyz drop --yes` abandons a lane (its last state stays in Z).
 
 **While you work**
