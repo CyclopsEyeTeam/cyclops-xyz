@@ -7,13 +7,17 @@ import { save } from '../src/save.mjs';
 import { listReceipts, getReceipt, markdown } from '../src/receipts.mjs';
 import { projectView, projectInfo, listView, listInfo } from '../src/view.mjs';
 
-const COMMANDS = ['arrive', 'map', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
+const COMMANDS = ['changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'promote', 'rollback', 'list', 'watch', 'help'];
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
   xyz <project>            everything about one project: xyz my-app · xyz --my-app · xyz app
   xyz arrive               the short arrival brief for an agent (map, notes, what is moving)   (--hook: silent outside projects)
   xyz map [project]        refresh and show the project's map, Z/MAP.md (the auto-saver keeps it fresh)
+  xyz lane "why"           your own numbered copy of Y (L1, L2…) so agents never mix their work
+  xyz land ["why"]         inside a lane: merge it into Y in order, one receipt with only your files  (--keep)
+  xyz lanes                the open lanes: who, what for, how much changed   (--all for closed ones too)
+  xyz drop [L2] --yes      close a lane without landing (its last state stays in Z)
   xyz list                 every project, with its latest receipt
   xyz new <Name>           start a new project with X, Y and Z        (--at <folder> to make it there)
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
@@ -24,11 +28,13 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz undo <receipt>       reverse just that change, keep everything after it   (--yes, --skip-changed)
   xyz try "<command>"      run a command on a copy of Y in RAM, then clean up  e.g. xyz try "node --test"
   xyz promote              check Y, then make it the live version in X
+                           (--saved: only what's kept, checked on that copy · xyz promote r-0042: that receipt's state)
   xyz rollback             go back to the previous live version
+  xyz changed              every unsaved file in Y and who last edited it
   xyz watch                save every project that changed (the auto-saver runs this every 15 min)
   xyz help                 this
 
-Everywhere: --json for tools, --yes to never be asked, --who <name> to sign receipts.`;
+Everywhere: --json for tools, --yes to never be asked, --who <name> to sign receipts, --wait to wait for a busy project.`;
 
 // ---- arguments ----
 const argv = process.argv.slice(2), flags = {}, pos = [];
@@ -38,7 +44,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--') && a.length > 2) { const k = a.slice(2); if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
+const KNOWN = new Set(['saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
@@ -56,12 +62,24 @@ function didYouMean(word) {
 }
 
 async function main() {
+  process.env.XYZ_LOCK_WHO ||= flags.who || process.env.XYZ_WHO || '';
+  process.env.XYZ_LOCK_CMD = argv.join(' ').slice(0, 120);
+  if (argv.includes('--wait')) process.env.XYZ_LOCK_WAIT_MS = '600000';
   // `xyz --my-app`: an unknown --flag with no command is a project name
   const loose = Object.keys(flags).filter(k => !KNOWN.has(k));
   let [cmd, ...rest] = pos;
   if (!cmd && loose.length === 1) { cmd = loose[0]; delete flags[loose[0]]; }
   if (flags.help) cmd = 'help';
 
+  if (['save', 'promote', 'rollback', 'undo', 'try', 'receipts', 'show'].includes(cmd)) {
+    const { laneHere, checkpoint } = await import('../src/lane.mjs');
+    const L = laneHere();
+    if (L && cmd === 'save') {
+      const why = rest.join(' ').trim(), n = checkpoint(L.p, L.lane, why || null);
+      return out({ lane: L.lane.id, changed: n }, `Kept lane ${L.lane.id} in Z: ${n} file${n === 1 ? '' : 's'} changed from where it started.\n  When it's done: xyz land`);
+    }
+    if (L && ['promote', 'rollback', 'undo', 'try'].includes(cmd)) fail(`you're in lane ${L.lane.id}: land it first (xyz land), then ${cmd} from Y`);
+  }
   switch (cmd) {
     case undefined: case 'status': {
       const p = resolveProject(rest[0]);
@@ -69,6 +87,31 @@ async function main() {
       return out(projectInfo(p), projectView(p));
     }
     case 'help': return console.log(HELP);
+    case 'changed': {
+      const p = here(rest[0] ?? null), { changesNow, lastWriters } = await import('../src/save.mjs');
+      const c = changesNow(p), w = lastWriters(p.z, c.last?.at ?? 0);
+      const rows = [...c.changed.map(f => ['~', f]), ...c.added.map(f => ['+', f]), ...c.removed.map(f => ['-', f])].map(([k, f]) => ({ kind: k, file: f, by: w.get(f) ?? null }));
+      return out(rows, rows.length ? rows.map(r => `${r.kind} ${r.file}${r.by ? `   — ${r.by}` : '   — (not known)'}`).join('\n') + `\n${rows.length} unsaved file${rows.length === 1 ? '' : 's'}` : 'Nothing unsaved in Y.');
+    }
+    case 'touch': {
+      // PostToolUse hook: remember who edited which file, so the auto-saver can sign each agent's work
+      if (!flags.hook) fail('touch is for the edit hook: xyz touch --hook (reads the hook JSON on stdin)');
+      try {
+        const { recordTouch } = await import('../src/save.mjs'), { realpathSync, existsSync } = await import('node:fs'), { dirname, relative } = await import('node:path');
+        const ev = JSON.parse(readFileSync(0, 'utf8') || '{}'), file = ev.tool_input?.file_path ?? ev.tool_input?.notebook_path;
+        if (!file) return;
+        let dir = dirname(resolve(ev.cwd ?? '.', file)); while (!existsSync(dir)) dir = dirname(dir);
+        const p = resolveProject(null, dir); if (!p) return;
+        const abs = resolve(realpathSync(dir), relative(dir, resolve(ev.cwd ?? '.', file)));
+        if (!abs.startsWith(p.y + '/')) return; // lanes and other folders keep their own record
+        recordTouch(p.z, abs.slice(p.y.length + 1), process.env.XYZ_WHO || (ev.session_id ? `claude-${String(ev.session_id).slice(0, 4)}` : 'claude'));
+      } catch {}
+      return;
+    }
+    case 'lane': case 'lanes': case 'land': case 'drop': {
+      const { laneCli } = await import('../src/lane.mjs');
+      return laneCli({ cmd, rest, flags, who: who(), out, fail, here });
+    }
     case 'arrive': {
       const { arriveCli } = await import('../src/arrive.mjs');
       return arriveCli({ query: rest[0], flags, out, fail });
@@ -95,7 +138,11 @@ async function main() {
       const p = here(null), why = rest.join(' ').trim();
       if (!why) fail('say why in a few words: xyz save "fixed the drawing crash"');
       let r;
-      if (flags.learned) { try { const { learn } = await import('../src/map.mjs'); learn(p, flags.learned, who()); } catch (e) { if (!['EACCES', 'EROFS', 'EPERM'].includes(e.code)) throw e; } }
+      let learned = '';
+      if (flags.learned) {
+        try { const { learn } = await import('../src/map.mjs'); learn(p, flags.learned, who()); learned = '\n  Learned note added to the map (Z/MAP.md).'; }
+        catch (e) { if (!['EACCES', 'EROFS', 'EPERM'].includes(e.code)) throw e; const { leavePending } = await import('../src/save.mjs'); leavePending(p, { why: '', who: who(), learned: flags.learned }); learned = '\n  Z is not writable from here: the learned note waits in Y for the auto-saver.'; }
+      }
       try { r = save(p, { why, who: who() }); }
       catch (e) {
         if (!['EACCES', 'EROFS', 'EPERM'].includes(e.code)) throw e;
@@ -103,7 +150,7 @@ async function main() {
         leavePending(p, { why, who: who() });
         return out({ pending: true, why }, `Z can't be written from here (a sandbox?), so your note is waiting in Y.\n  The auto-saver turns it into a receipt within 15 minutes: "${why}"`);
       }
-      return out(r, r ? `Kept: ${r.id} — ${r.title}\n  ${r.changed.length} changed · ${r.added.length} added · ${r.removed.length} removed\n  Undo with: xyz undo ${r.id}` : 'Nothing changed since the last receipt; nothing to keep.');
+      return out(r, (r ? `Kept: ${r.id} — ${r.title}\n  ${r.changed.length} changed · ${r.added.length} added · ${r.removed.length} removed\n  Undo with: xyz undo ${r.id}` : 'Nothing changed since the last receipt; nothing to keep.') + learned);
     }
     case 'receipts': {
       const p = here(null), rs = listReceipts(p.z, Number(rest[0]) || 15);
@@ -116,7 +163,11 @@ async function main() {
     }
     case 'undo': { const { undoCli } = await import('../src/undo.mjs'); return undoCli({ p: here(null), rest, flags, who: who(), out, fail }); }
     case 'try': { const { tryCli } = await import('../src/try.mjs'); return tryCli({ p: here(null), rest, flags, who: who(), out, fail }); }
-    case 'promote': case 'rollback': { const L = await import('../src/live.mjs'); return L[`${cmd}Cli`]({ p: here(null), rest, flags, who: who(), out, fail }); }
+    case 'promote': case 'rollback': {
+      if (cmd === 'promote' && !flags.saved && !rest[0]) {
+        const { listLanes } = await import('../src/lane.mjs'); const p = here(null), open = listLanes(p);
+        if (open.length) console.error(`xyz: note — ${open.length} lane${open.length === 1 ? ' is' : 's are'} still open (${open.map(l => l.id).join(', ')}); their work isn't in Y yet. Use --saved to promote only what's kept.`);
+      } const L = await import('../src/live.mjs'); return L[`${cmd}Cli`]({ p: here(null), rest, flags, who: who(), out, fail }); }
     case 'watch': { const { watchOnce } = await import('../src/watch.mjs'); const rs = watchOnce({ who: flags.who || 'xyz-watch' }); return out(rs, rs.map(r => `${r.project}: ${r.error ? `⚠ ${r.error}` : r.receipt ? `kept ${r.receipt.id} (${r.receipt.title})` : 'no change'}`).join('\n') || 'No projects yet.'); }
     default: {
       const p = resolveProject(cmd);

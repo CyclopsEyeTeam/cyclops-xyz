@@ -80,6 +80,11 @@ xyz convert ~/Documents/MyWebsite   # a git folder: keeps its story
 | `xyz <project>` | Everything about one project, by a loose name. |
 | `xyz arrive` | A short brief for an agent arriving in the project: what it is, how to run and test it, where things live, what to be careful with, what is moving. `--hook` is silent outside projects. |
 | `xyz map [project]` | Refresh and show the project's map, `Z/MAP.md`. |
+| `xyz lane "why"` | Your own numbered copy of Y (L1, L2…), so several agents never mix their work. |
+| `xyz land ["why"]` | Inside a lane: merge it into Y in landing order, with one receipt holding only its files. Clashing lines come back to the lane marked. |
+| `xyz lanes` / `xyz drop --yes` | Who is working where / close a lane without landing (kept in Z). |
+| `xyz changed` | Every unsaved file in Y and who last edited it. |
+| `xyz promote --saved` / `xyz promote r-0042` | Ship only what is kept (checked on that exact copy) / ship that receipt's state. |
 | `xyz list` | Every project, with its latest receipt. |
 | `xyz new <Name>` | Start a project with X, Y and Z (`--at <folder>` to make it somewhere else). |
 | `xyz adopt <folder>` | Bring a folder in where it is. |
@@ -115,6 +120,21 @@ instruction block: copy it into your agent's instructions (for example `~/.codex
 project's `AGENTS.md` or `CLAUDE.md`) and agents will look around with `xyz`, sign their own receipts
 and keep `NOTES.md` current. In our first test, an agent told nothing about XYZ found it on its own,
 read the notes, did its job and signed its receipt.
+
+### Many agents at once: lanes
+
+When several agents work on one project, each takes a lane: `xyz lane "team sharing"` copies Y (as it is
+right now) to `~/XYZ/<project>/lanes/L1-team-sharing/`, with dependency folders linked, not copied. The agent
+works there; the auto-saver keeps every open lane safe in Z. `xyz land` merges the lane into Y: files only the
+lane changed are taken as they are, files changed on both sides are merged line by line, and if the same lines
+changed on both sides nothing lands — the lane is moved on top of Y with the clash marked (or, for files that
+can't be merged line by line, Y's version placed beside the lane's as `<file>.Y-L2`), and `xyz land` refuses
+until every clash is settled. Lanes land one at a time, in the order they ask, so the second lane always merges on top of the first.
+Each landing is one receipt signed by that agent, with only its files, and can be undone like any other.
+
+Agents that edit Y directly can still be told apart: a Claude Code PostToolUse hook (`xyz touch --hook`,
+matcher `Edit|Write|MultiEdit|NotebookEdit`) signs each edited file, and the auto-saver then keeps one
+receipt per agent. `xyz promote --saved` makes live only what is kept, so nobody's half-done files ship.
 
 ### Light from the first moment
 

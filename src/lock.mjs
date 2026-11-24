@@ -21,7 +21,7 @@ function acquire(z, waitMs) {
   for (;;) {
     try {
       const fd = openSync(f, 'wx', 0o600);
-      writeSync(fd, JSON.stringify({ pid: process.pid, start: MY_START, token, at: Date.now() })); fsyncSync(fd); closeSync(fd);
+      writeSync(fd, JSON.stringify({ pid: process.pid, start: MY_START, token, at: Date.now(), who: process.env.XYZ_LOCK_WHO || null, cmd: process.env.XYZ_LOCK_CMD || null })); fsyncSync(fd); closeSync(fd);
       return token;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
@@ -43,7 +43,11 @@ function acquire(z, waitMs) {
         }
         continue;
       }
-      if (Date.now() > until) throw new Error('another xyz is working on this project; try again in a moment');
+      if (Date.now() > until) {
+        const since = holder?.at ? `${Math.round((Date.now() - holder.at) / 1000)} s` : 'a moment';
+        const what = holder ? `${holder.who ? `${holder.who} is` : 'another xyz is'} running "xyz ${holder.cmd ?? '…'}" (pid ${holder.pid}, for ${since})` : 'another xyz is working on this project';
+        throw new Error(`${what}; waited ${Math.round(waitMs / 1000)} s. Try again, or add --wait to wait up to 10 minutes`);
+      }
       pause(25 + Math.floor(Math.random() * 50));
     }
   }
@@ -55,7 +59,7 @@ function release(z, token) {
   try { const aside = `${f}.release.${process.pid}.${token}`; renameSync(f, aside); unlinkSync(aside); } catch {}
 }
 
-export function withLock(z, fn, { waitMs = 30000 } = {}) {
+export function withLock(z, fn, { waitMs = Number(process.env.XYZ_LOCK_WAIT_MS) || 30000 } = {}) {
   let h = held.get(z);
   if (!h) { h = { depth: 0, token: acquire(z, waitMs) }; held.set(z, h); }
   h.depth++;

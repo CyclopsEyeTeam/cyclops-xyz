@@ -3,7 +3,8 @@ import { mkdirSync, existsSync, readlinkSync, symlinkSync, renameSync, readFileS
 import { join, basename, dirname } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { withLock } from './lock.mjs';
-import { save, latestSnapshot } from './save.mjs';
+import { save, latestSnapshot, loadSnapshot } from './save.mjs';
+import { getReceipt } from './receipts.mjs';
 import { getBlob } from './store.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { nextId, writeReceipt } from './receipts.mjs';
@@ -31,14 +32,20 @@ function receipt(p, who, kind, title, why, snapshot, before) {
   return writeReceipt(p.z, { id: nextId(p.z), kind, who, at: Date.now(), title, why, snapshot, before, added: [], removed: [], changed: [] });
 }
 
-export function promote(p, { who = 'agent' } = {}) {
+/** saved: promote what is already kept (no sweep of Y, so other agents' unsaved work never ships),
+ *  and run the check on that exact copy instead of on Y. from: a receipt id whose snapshot to promote. */
+export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
   return withLock(p.z, () => {
-    save(p, { kind: 'auto', who, why: 'before promote' });
-    if (p.config.check) {
+    const exact = saved || from;
+    if (!exact) save(p, { kind: 'auto', who, why: 'before promote' });
+    if (p.config.check && !exact) {
       const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, encoding: 'utf8', maxBuffer: 64 << 20 });
       if (c.status !== 0) throw new Error(`check failed ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
     }
-    const snap = latestSnapshot(p.z), version = snap.id, dir = join(p.x, 'versions', version);
+    let snap = latestSnapshot(p.z);
+    if (from) { const r = getReceipt(p.z, from); if (!r.snapshot) throw new Error(`${r.id} has no saved state to promote`); snap = loadSnapshot(p.z, r.snapshot); }
+    if (!snap) throw new Error('nothing saved yet to promote');
+    const version = snap.id, dir = join(p.x, 'versions', version);
     if (!existsSync(dir)) {
       const tmp = `${dir}.${process.pid}.tmp`; rmSync(tmp, { recursive: true, force: true });
       for (const [rel, f] of Object.entries(snap.files)) {
@@ -48,6 +55,10 @@ export function promote(p, { who = 'agent' } = {}) {
       mkdirSync(tmp, { recursive: true });
       for (const d of p.config.deps ?? []) if (existsSync(join(p.y, d))) cpSync(join(p.y, d), join(tmp, d), { recursive: true, verbatimSymlinks: true });
       writeAtomic(join(tmp, '.xyz-version'), JSON.stringify({ version, at: Date.now(), from: p.y }) + '\n');
+      if (p.config.check && exact) {
+        const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, encoding: 'utf8', maxBuffer: 64 << 20 });
+        if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw new Error(`check failed on the saved copy ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`); }
+      }
       renameSync(tmp, dir);
     }
     const before = current(p);
@@ -76,5 +87,5 @@ export function rollback(p, { who = 'agent' } = {}) {
   });
 }
 
-export function promoteCli({ p, who, out }) { const r = promote(p, { who }); out(r, `Live now: ${r.label}\n  ${r.why}\n  Go back with: xyz rollback`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }
+export function promoteCli({ p, who, out, rest = [], flags = {} }) { const r = promote(p, { who, saved: !!flags.saved, from: rest[0] ?? null }); out(r, `Live now: ${r.label}\n  ${r.why}\n  Go back with: xyz rollback`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }
 export function rollbackCli({ p, who, out }) { const r = rollback(p, { who }); out(r, `Live now: ${r.label}\n  ${r.why}`); if (r.restartFailed) { console.error('xyz: the restart failed; see the receipt above'); process.exitCode = 1; } }

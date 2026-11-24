@@ -4,6 +4,7 @@ import { join, basename } from 'node:path';
 import { listReceipts, when } from './receipts.mjs';
 import { changesNow } from './save.mjs';
 import { allHomes, openProject } from './project.mjs';
+import { laneLines } from './lane.mjs';
 
 const ago = at => { const s = (Date.now() - at) / 1000; return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
 const lastLine = f => { try { const ls = readFileSync(f, 'utf8').trim().split('\n'); return JSON.parse(ls.at(-1)); } catch { return null; } };
@@ -36,8 +37,9 @@ export function projectView(p) {
     const all = [...u.changed.map(f => `~ ${f}`), ...u.added.map(f => `+ ${f}`), ...u.removed.map(f => `- ${f}`)];
     L.push(all.length ? `Unsaved in Y: ${all.length} file${all.length === 1 ? '' : 's'} (xyz save "why" keeps them)` : 'Unsaved in Y: nothing, all kept');
     for (const f of all.slice(0, 10)) L.push(`   ${f}`);
-    if (all.length > 10) L.push(`   … and ${all.length - 10} more`);
+    if (all.length > 10) L.push(`   … and ${all.length - 10} more (all of them, with who edited each: xyz changed)`);
   }
+  try { const ls = laneLines(p); if (ls.length) { L.push('', 'Open lanes:'); for (const l of ls) L.push(`  ${l}`); } } catch {}
   L.push('', 'Latest receipts:');
   for (const r of i.receipts) L.push(`  ${r.id}  ${ago(r.at).padEnd(12)} ${r.who.padEnd(10)} ${r.title}`);
   if (!i.receipts.length) L.push('  none yet');

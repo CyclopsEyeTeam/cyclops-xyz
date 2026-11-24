@@ -142,7 +142,7 @@ export function buildFacts(p) {
   const L = [`# ${p.name} — map`, '', clip(about || '(No description yet: write one at the top of Z/NOTES.md.)', 500), ''];
   L.push(`Y (work here): ${p.y}`, `Z (memory): ${p.z}  ·  notes: Z/NOTES.md`, `${files.length} files kept` + (top.size > dirs.length ? ` in ${top.size} folders (the ${dirs.length} biggest below)` : ''), '');
   L.push('## Run and test', '');
-  if (!how.run.length && !how.test.length) L.push('(Nothing obvious found. Say how in "Kept by hand" below.)');
+  if (!how.run.length && !how.test.length) L.push('(Nothing obvious found. Once you know, leave it for the next agent: xyz save "why" --learned "run: <command> · test: <command>")');
   for (const r of how.run) L.push(`- run: ${r}`);
   for (const t of how.test) L.push(`- test: ${t}`);
   L.push('', '## Where things live', '');
@@ -203,7 +203,8 @@ export function arrive(p, { unsaved = null, live = null } = {}) {
   add('Careful', section('Careful', 700));
   add('What is moving', section('What is moving', 700));
   if (hand && !hand.startsWith('(Anything the next agent')) add('Kept by hand', hand.length > 900 ? hand.slice(0, 900) + '…' : hand);
-  L.push('', 'When you finish a piece: xyz save "why" --who <your name> --learned "<one thing about this terrain>"');
+  L.push('', 'When you finish a piece: xyz save "why" --who <your name> --learned "<one thing about this terrain>"',
+    "If your sandbox can't write Z, save and --learned wait in Y and the auto-saver keeps them within 15 min: don't retry.");
   return L.join('\n');
 }
 

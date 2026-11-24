@@ -66,7 +66,7 @@ export function convert(path, { includeOnline = false, who = 'agent', all = null
   path = resolve(path);
   const g = join(path, '.git');
   if (!existsSync(g)) return adopt(path, { who });
-  if (!lstatSync(g).isDirectory()) throw new Error(`${basename(path)} is a git worktree link (its history lives elsewhere); convert the main folder instead`);
+  if (!lstatSync(g).isDirectory()) throw new Error(`${basename(path)} is a git worktree link (its history lives elsewhere); convert the main folder instead, or bring this folder in as it is with: xyz adopt ${path}`);
   if (!workingGit(path)) throw new Error(`${basename(path)}/.git is not a working git folder (empty or broken); use: xyz adopt ${path}`);
   if (existsSync(join(path, '.xyz'))) throw new Error(`${basename(path)} is already in XYZ (home: ${readFileSync(join(path, '.xyz'), 'utf8').trim()})`);
   const remote = remoteOf(path);

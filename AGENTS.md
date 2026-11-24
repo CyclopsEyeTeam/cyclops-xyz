@@ -20,6 +20,18 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 - The full map is `Z/MAP.md` (refreshed by the auto-saver); read it before searching the code.
   `Z/NOTES.md` has the story.
 
+**Working alongside other agents: take a lane**
+- If other agents may be working in the same project, don't edit Y directly. Run
+  `xyz lane "what you're doing" --who <your name>`: you get your own numbered copy (L1, L2, …) and its path.
+  Work there. `xyz save "why"` inside the lane keeps it safe in Z (no receipt in Y).
+- When done, `xyz land` (from inside the lane) merges your changes into Y in the order lanes land, with one
+  receipt signed by you holding only your files. Others' work is never swept into your receipt.
+- If it says your files clash with work that landed first, nothing was landed: your lane now sits on top of Y.
+  Same lines changed on both sides are marked `<<<<<<<` / `>>>>>>>` in the file; for files that can't be merged
+  line by line, Y's version sits next to yours as `<file>.Y-L2`: keep what you want, then delete that file.
+  `xyz land` refuses until every clash is settled.
+- `xyz lanes` shows who is working where. `xyz drop --yes` abandons a lane (its last state stays in Z).
+
 **While you work**
 - Work in Y. Edit files normally.
 - Quick tests can run on a throwaway copy in RAM: `xyz try "<command>"` (exit code passes through).
@@ -35,6 +47,8 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 
 **Going live and undoing**
 - `xyz promote` runs the project's check and makes Y the live version in X; `xyz rollback` goes back.
+  When other agents are working, use `xyz promote --saved`: it ships only what is kept (landed or saved),
+  never someone's half-done files in Y, and runs the check on that exact copy.
   Only do this when you were asked to make something live.
 - `xyz undo r-NNNN --yes` reverses just that receipt's changes and keeps later work. If it refuses because
   a later change touched the same file, report that instead of forcing it.
@@ -45,5 +59,11 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 - Do not delete anything under Z or the project home (`~/XYZ/<project>`): it is the project's memory.
 - Do not move a project's running services to X, or bring more folders into XYZ (`xyz convert`), unless
   the person asked for it.
+
+**Who changed what**
+- With the edit hook installed (`xyz touch --hook` on Claude Code's PostToolUse for Edit/Write), every edit in
+  Y is signed, and the auto-saver keeps one receipt per agent, so each agent's work can be undone alone.
+- `xyz changed` lists every unsaved file and who last edited it.
+- If a project is busy, xyz names who holds it; add `--wait` to wait up to 10 minutes instead of retrying.
 
 `xyz help` lists every command. Every read command accepts `--json`.
