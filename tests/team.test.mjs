@@ -56,3 +56,18 @@ test('a busy project says who holds it; save --learned with nothing changed stil
   assert.match(s.out, /Nothing changed[\s\S]*Learned note added/);
   assert.match(readFileSync(join(z, 'MAP.md'), 'utf8'), /the c file is generated/);
 });
+
+test('a long promote check never holds the project: others save meanwhile; --wait takes a time', async () => {
+  const { root, y } = project({ check: 'sleep 3' });
+  const { spawn } = await import('node:child_process');
+  const pr = spawn(process.execPath, [BIN, 'promote', '--saved'], { cwd: y, env: { ...process.env, XYZ_ROOT: root, XYZ_RAM: join(root, '.ram'), XYZ_WHO: '' } });
+  const done = new Promise(r => pr.on('exit', r));
+  await new Promise(r => setTimeout(r, 800));
+  writeFileSync(join(y, 'b.txt'), 'saved during the check\n');
+  const t0 = Date.now(), s = xyz(root, ['save', 'during promote'], { cwd: y, env: { XYZ_LOCK_WAIT_MS: '1000' } });
+  assert.equal(s.code, 0, s.out); assert.ok(Date.now() - t0 < 2000, 'save did not wait for the check');
+  assert.equal(await done, 0);
+  assert.equal(readFileSync(join(root, 'Crew', 'X', 'current', 'b.txt'), 'utf8'), 'b\n', 'promote shipped what was kept when it started');
+  assert.match(xyz(root, ['save', 'x', '--wait=soon'], { cwd: y }).out, /--wait takes a time/);
+  assert.equal(xyz(root, ['save', 'x', '--wait=2m'], { cwd: y }).code, 0);
+});

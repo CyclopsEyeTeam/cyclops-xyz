@@ -34,14 +34,14 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz watch                save every project that changed (the auto-saver runs this every 15 min)
   xyz help                 this
 
-Everywhere: --json for tools, --yes to never be asked, --who <name> to sign receipts, --wait to wait for a busy project.`;
+Everywhere: --json for tools, --yes to never be asked, --who <name> to sign receipts, --wait to wait for a busy project (--wait=45m for at most that long).`;
 
 // ---- arguments ----
 const argv = process.argv.slice(2), flags = {}, pos = [];
 const VALUE_FLAGS = new Set(['who', 'at', 'learned']);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a.startsWith('--') && a.length > 2) { const k = a.slice(2); if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
+  if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
 const KNOWN = new Set(['saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help']);
@@ -64,7 +64,12 @@ function didYouMean(word) {
 async function main() {
   process.env.XYZ_LOCK_WHO ||= flags.who || process.env.XYZ_WHO || '';
   process.env.XYZ_LOCK_CMD = argv.join(' ').slice(0, 120);
-  if (argv.includes('--wait')) process.env.XYZ_LOCK_WAIT_MS = '600000';
+  if (flags.wait) {
+    // --wait: wait as long as the holder is alive (a dead holder's lock is cleared anyway); --wait=45m: at most that long
+    const m = String(flags.wait).match(/^(\d+(?:\.\d+)?)\s*(s|m|h)?$/);
+    if (flags.wait !== true && !m) fail(`--wait takes a time like --wait=45m, --wait=2h or --wait=90s`);
+    process.env.XYZ_LOCK_WAIT_MS = String(m ? Number(m[1]) * { s: 1e3, m: 6e4, h: 3.6e6 }[m[2] ?? 'm'] : 24 * 3.6e6);
+  }
   // `xyz --my-app`: an unknown --flag with no command is a project name
   const loose = Object.keys(flags).filter(k => !KNOWN.has(k));
   let [cmd, ...rest] = pos;

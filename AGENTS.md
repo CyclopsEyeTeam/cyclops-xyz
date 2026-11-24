@@ -64,6 +64,6 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 - With the edit hook installed (`xyz touch --hook` on Claude Code's PostToolUse for Edit/Write), every edit in
   Y is signed, and the auto-saver keeps one receipt per agent, so each agent's work can be undone alone.
 - `xyz changed` lists every unsaved file and who last edited it.
-- If a project is busy, xyz names who holds it; add `--wait` to wait up to 10 minutes instead of retrying.
+- If a project is busy, xyz names who holds it; add `--wait` to wait while the holder is still running (or `--wait=45m` for at most that long) instead of retrying.
 
 `xyz help` lists every command. Every read command accepts `--json`.

@@ -33,39 +33,47 @@ function receipt(p, who, kind, title, why, snapshot, before) {
 }
 
 /** saved: promote what is already kept (no sweep of Y, so other agents' unsaved work never ships),
- *  and run the check on that exact copy instead of on Y. from: a receipt id whose snapshot to promote. */
+ *  and run the check on that exact copy instead of on Y. from: a receipt id whose snapshot to promote.
+ *  The project lock is held only to pick what to promote and to switch X — never during the check, which
+ *  can take a long time — so other agents can keep saving and landing meanwhile. */
 export function promote(p, { who = 'agent', saved = false, from = null } = {}) {
-  return withLock(p.z, () => {
-    const exact = saved || from;
+  const exact = saved || from;
+  const snap = withLock(p.z, () => {
     if (!exact) save(p, { kind: 'auto', who, why: 'before promote' });
-    if (p.config.check && !exact) {
-      const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, encoding: 'utf8', maxBuffer: 64 << 20 });
-      if (c.status !== 0) throw new Error(`check failed ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
+    let s = latestSnapshot(p.z);
+    if (from) { const r = getReceipt(p.z, from); if (!r.snapshot) throw new Error(`${r.id} has no saved state to promote`); s = loadSnapshot(p.z, r.snapshot); }
+    if (!s) throw new Error('nothing saved yet to promote');
+    return s;
+  });
+  const version = snap.id, dir = join(p.x, 'versions', version);
+  const fail = (c, where) => new Error(`check failed${where} ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
+  if (p.config.check && !exact) {
+    const c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, encoding: 'utf8', maxBuffer: 64 << 20 });
+    if (c.status !== 0) throw fail(c, '');
+  }
+  // build the version outside the lock (snapshots and blobs never change); its own tmp folder per process
+  let tmp = null;
+  if (!existsSync(dir)) {
+    tmp = `${dir}.${process.pid}.tmp`; rmSync(tmp, { recursive: true, force: true });
+    for (const [rel, f] of Object.entries(snap.files)) {
+      const to = join(tmp, rel); mkdirSync(dirname(to), { recursive: true });
+      if (f.link !== undefined) symlinkSync(f.link, to); else writeAtomic(to, getBlob(p.z, f.hash), f.mode ?? 0o644);
     }
-    let snap = latestSnapshot(p.z);
-    if (from) { const r = getReceipt(p.z, from); if (!r.snapshot) throw new Error(`${r.id} has no saved state to promote`); snap = loadSnapshot(p.z, r.snapshot); }
-    if (!snap) throw new Error('nothing saved yet to promote');
-    const version = snap.id, dir = join(p.x, 'versions', version);
-    if (!existsSync(dir)) {
-      const tmp = `${dir}.${process.pid}.tmp`; rmSync(tmp, { recursive: true, force: true });
-      for (const [rel, f] of Object.entries(snap.files)) {
-        const to = join(tmp, rel); mkdirSync(dirname(to), { recursive: true });
-        if (f.link !== undefined) symlinkSync(f.link, to); else writeAtomic(to, getBlob(p.z, f.hash), f.mode ?? 0o644);
-      }
-      mkdirSync(tmp, { recursive: true });
-      for (const d of p.config.deps ?? []) if (existsSync(join(p.y, d))) cpSync(join(p.y, d), join(tmp, d), { recursive: true, verbatimSymlinks: true });
-      writeAtomic(join(tmp, '.xyz-version'), JSON.stringify({ version, at: Date.now(), from: p.y }) + '\n');
-      if (p.config.check && exact) {
-        const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, encoding: 'utf8', maxBuffer: 64 << 20 });
-        if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw new Error(`check failed on the saved copy ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`); }
-      }
-      renameSync(tmp, dir);
+    mkdirSync(tmp, { recursive: true });
+    for (const d of p.config.deps ?? []) if (existsSync(join(p.y, d))) cpSync(join(p.y, d), join(tmp, d), { recursive: true, verbatimSymlinks: true });
+    writeAtomic(join(tmp, '.xyz-version'), JSON.stringify({ version, at: Date.now(), from: p.y }) + '\n');
+    if (p.config.check && exact) {
+      const c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, encoding: 'utf8', maxBuffer: 64 << 20 });
+      if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw fail(c, ' on the saved copy'); }
     }
+  }
+  return withLock(p.z, () => {
+    if (tmp) { if (existsSync(dir)) rmSync(tmp, { recursive: true, force: true }); else renameSync(tmp, dir); }
     const before = current(p);
     const n = versionNumber(p, version), was = before ? ` (was v${versionNumber(p, before)})` : '';
     switchTo(p, version);
     const rs = restart(p);
-    const r = receipt(p, who, 'promote', `Made v${n} live`, `Promoted Y to X as v${n}${was}; ${rs.text}`, version, before);
+    const r = receipt(p, who, 'promote', `Made v${n} live`, `Promoted ${from ? `${from}'s state` : exact ? 'what was kept' : 'Y'} to X as v${n}${was}; ${rs.text}`, version, before);
     appendFileSync(join(p.x, 'history.jsonl'), JSON.stringify({ at: r.at, kind: 'promote', version, before, receipt: r.id }) + '\n');
     return { ...r, label: `v${n}`, restartFailed: !rs.ok };
   });

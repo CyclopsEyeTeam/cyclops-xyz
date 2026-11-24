@@ -46,7 +46,7 @@ function acquire(z, waitMs) {
       if (Date.now() > until) {
         const since = holder?.at ? `${Math.round((Date.now() - holder.at) / 1000)} s` : 'a moment';
         const what = holder ? `${holder.who ? `${holder.who} is` : 'another xyz is'} running "xyz ${holder.cmd ?? '…'}" (pid ${holder.pid}, for ${since})` : 'another xyz is working on this project';
-        throw new Error(`${what}; waited ${Math.round(waitMs / 1000)} s. Try again, or add --wait to wait up to 10 minutes`);
+        throw new Error(`${what}; waited ${Math.round(waitMs / 1000)} s. Try again, or add --wait (waits while it is still running) or --wait=45m`);
       }
       pause(25 + Math.floor(Math.random() * 50));
     }
