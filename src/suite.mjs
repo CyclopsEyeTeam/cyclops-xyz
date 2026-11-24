@@ -24,7 +24,8 @@ export function suiteLine(r, label = 'Suite') {
   const head = passed === true ? `passed${r.pass != null ? ` ${num(r.pass)}` : ''}`
     : passed === false ? `FAILED${r.fail != null ? ` ${num(r.fail)}` : ''}${Array.isArray(r.failedFiles) && r.failedFiles.length ? ` (${r.failedFiles.slice(0, 3).join(', ')}${r.failedFiles.length > 3 ? ', …' : ''})` : ''}`
     : 'ran';
-  const bits = [head];
+  const loads = Object.values(r.failedLoad ?? {}).filter(n => typeof n === 'number');
+  const bits = [r.cores && loads.some(n => n >= r.cores) ? `${head} under load ${Math.max(...loads)} on ${r.cores} cores` : head];
   if (r.full) bits.push('full run');
   else if (r.ran != null || r.fromBuffer != null) bits.push([r.ran != null && `${num(r.ran)} ran`, r.fromBuffer != null && `${num(r.fromBuffer)} buffered`].filter(Boolean).join(', '));
   const when = ago(r.at); if (when) bits.push(when);

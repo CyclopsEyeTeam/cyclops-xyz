@@ -24,7 +24,8 @@ function project(extra = {}, config = null) {
   age(y);
   return { root, y, home };
 }
-const run = (root, cwd, args = []) => xyz(root, ['test', '--jobs', '2', ...args], { cwd });
+// the machine's real load must not change these tests: they say what it is
+const run = (root, cwd, args = []) => xyz(root, ['test', '--jobs', '2', ...args], { cwd, env: { XYZ_TEST_LOAD: '0' } });
 
 test('xyz test runs every file, then counts unchanged passes from the buffer and reruns only what a change touched', () => {
   const { root, y, home } = project();
@@ -77,4 +78,17 @@ test('recorder "none" runs side by side without buffering; "strace" sees any pro
   r = run(st.root, st.y); assert.match(r.out, /1 files — 1 from the buffer/, r.out);
   writeFileSync(join(st.y, 'src', 'b.txt'), 'bee two\n'); age(st.y);
   r = run(st.root, st.y); assert.match(r.out, /run tests\/s\.sh: changed: src\/b\.txt/, r.out);
+});
+
+test('a busy machine: fewer jobs at the start, a bounded wait for quiet before judging alone, the load named on failure', () => {
+  const { root, y, home } = project({ 'tests/c.test.mjs': "import { test } from 'node:test'; import assert from 'node:assert';\ntest('c', () => assert.equal(1, 2));\n" });
+  const env = { XYZ_TEST_LOAD: '100', XYZ_TEST_QUIET_WAIT_S: '1' };
+  let r = xyz(root, ['test'], { cwd: y, env });
+  assert.match(r.out, /side by side on 1 jobs \(fewer: the machine is busy, load 100\.0/);
+  r = xyz(root, ['test', '--jobs', '2'], { cwd: y, env });
+  assert.match(r.out, /waiting for the machine to quieten/);
+  assert.match(r.out, /FAIL tests\/c\.test\.mjs \(exit 1, 1 failing; load 100\.0 on \d+ cores; still busy after 1s/);
+  const last = JSON.parse(readFileSync(join(home, 'Z', 'tests', 'last.json'), 'utf8'));
+  assert.equal(last.failedLoad['tests/c.test.mjs'], 100);
+  assert.match(xyz(root, ['arrive'], { cwd: y }).out, /Tests: FAILED 1 \(tests\/c\.test\.mjs\) under load 100 on \d+ cores/);
 });

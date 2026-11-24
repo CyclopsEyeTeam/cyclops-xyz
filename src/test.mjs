@@ -38,6 +38,9 @@
 // - The latest whole-suite run goes to Z/tests/last.json (and last-check.json for promote's check), which `xyz arrive`
 //   and `xyz lanes` show.
 // - --full (or XYZ_TEST_FULL=1) ignores the buffer and refills it.
+// - It shares the machine: with no --jobs/XYZ_TEST_JOBS it starts fewer jobs when the load is already high, waits (up
+//   to 10 min, XYZ_TEST_QUIET_WAIT_S) for the load to drop below the core count before each alone re-judge, and names
+//   the load on every failure (FAIL line, last.json failedLoad), so a failure under load reads as one.
 // - memoryMax runs the whole thing in a memory-capped systemd scope, when one is to be had.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -102,6 +105,7 @@ function settings(p, root, flags, files) {
     full: !!flags.full || process.env.XYZ_TEST_FULL === '1',
     bail: !!flags.bail,
     log: typeof flags.log === 'string' ? path.resolve(flags.log) : null,
+    jobsAsked: flags.jobs != null || process.env.XYZ_TEST_JOBS != null,
     jobs: Math.max(1, num(flags.jobs, num(process.env.XYZ_TEST_JOBS, num(c.jobs, Math.max(1, Math.min(6, os.availableParallelism() - 2)))))),
     maxAgeHours: num(flags['max-age-hours'], num(process.env.XYZ_TEST_MAX_AGE_HOURS, num(c.maxAgeHours, 24))),
     recorder: c.recorder ?? 'node',
@@ -318,6 +322,22 @@ function inMemoryScope(s) {
   return inner.status ?? 130;
 }
 
+// --- the machine's load -------------------------------------------------------------------------------------------------
+// Other agents' suites, live apps and builds share the machine. A timing test judged "alone" at load 40 on 8 cores is not
+// alone, so: start fewer jobs when it is already busy, wait (bounded) for quiet before each alone re-judge, and say the
+// load on every failure. XYZ_TEST_LOAD overrides the reading (for tests of this file).
+const CORES = os.availableParallelism();
+const load = () => Number(process.env.XYZ_TEST_LOAD ?? os.loadavg()[0]);
+const loadText = () => `load ${load().toFixed(1)} on ${CORES} cores`;
+async function waitForQuiet(say) {
+  const maxMs = Number(process.env.XYZ_TEST_QUIET_WAIT_S ?? 600) * 1000, t0 = Date.now();
+  if (load() < CORES) return null;
+  say(`#   waiting for the machine to quieten (${loadText()}) before judging alone, at most ${Math.round(maxMs / 60000)} min`);
+  while (load() >= CORES && Date.now() - t0 < maxMs) await new Promise(r => setTimeout(r, Math.min(3000, maxMs)));
+  const waited = Math.round((Date.now() - t0) / 1000);
+  return load() < CORES ? `waited ${waited}s for quiet` : `still busy after ${waited}s (${loadText()}), ran anyway`;
+}
+
 // --- the run ------------------------------------------------------------------------------------------------------------
 export async function testCli({ p, rest, flags, who, fail }) {
   const root = treeRoot() ?? p.y;
@@ -331,6 +351,11 @@ export async function testCli({ p, rest, flags, who, fail }) {
 
   const { toKey, fromKey } = keyer(root);
   const salt = saltOf(s);
+  let jobsNote = '';
+  if (!s.jobsAsked && s.jobs > 1) {
+    const fit = Math.max(1, Math.min(s.jobs, Math.floor(CORES - load())));
+    if (fit < s.jobs) { jobsNote = ` (fewer: the machine is busy, ${loadText()})`; s.jobs = fit; }
+  }
   const buffer = loadBuffer(s.buffer);
   const prints = new Prints(fromKey);
   const maxAgeMs = s.maxAgeHours * 3600_000;
@@ -349,7 +374,7 @@ export async function testCli({ p, rest, flags, who, fail }) {
   const expected = (f) => buffer.durations[f] ?? 30_000; // an unknown file starts early, in case it is a long one
   const together = toRun.filter((t) => !buffer.alone[t.file]).sort((a, b) => expected(b.file) - expected(a.file));
   const alone = toRun.filter((t) => buffer.alone[t.file]);
-  say(`# xyz test: ${s.files.length} files — ${fromBuffer.length} from the buffer, ${toRun.length} to run (${together.length} side by side on ${s.jobs} jobs, ${alone.length} alone)`);
+  say(`# xyz test: ${s.files.length} files — ${fromBuffer.length} from the buffer, ${toRun.length} to run (${together.length} side by side on ${s.jobs} jobs${jobsNote}, ${alone.length} alone)`);
   for (const t of toRun.slice(0, 40)) say(`#   run ${t.file}: ${t.reason}`);
   if (toRun.length > 40) say(`#   ...and ${toRun.length - 40} more`);
 
@@ -408,8 +433,8 @@ export async function testCli({ p, rest, flags, who, fail }) {
       if (s.bail) paused = true;
     } else {
       mine.entries[task.file] = null; mine.dropped[task.file] = Date.now();
-      results.set(task.file, { ok: false, summary, output: run.output });
-      say(`FAIL ${task.file} (exit ${code}, ${summary.fail} failing)`);
+      results.set(task.file, { ok: false, summary, output: run.output, load: Number(load().toFixed(1)) });
+      say(`FAIL ${task.file} (exit ${code}, ${summary.fail} failing; ${loadText()}${task.quiet ? `; ${task.quiet}` : ''})`);
       if (s.bail) halted = true;
       progress();
     }
@@ -421,6 +446,8 @@ export async function testCli({ p, rest, flags, who, fail }) {
   process.on('SIGTERM', onSignal);
 
   const runAlone = async (task) => {
+    task.quiet = await waitForQuiet(say);
+    if (halted) return;
     const run = runFile(s, task.file, work, ++index);
     running.add(run);
     await finish(task, run, true);
@@ -469,7 +496,8 @@ export async function testCli({ p, rest, flags, who, fail }) {
   writeStatus(s, who, {
     files: s.files.length, ran: ran.length, fromBuffer: fromBuffer.length, notRun: notRun.length,
     tests: total.tests + projected.tests, pass: total.pass + projected.pass, fail: total.fail,
-    failedFiles: failed.map(([file]) => file), passedOnlyAlone: loadSensitive,
+    failedFiles: failed.map(([file]) => file), failedLoad: Object.fromEntries(failed.map(([file, r]) => [file, r.load])), cores: CORES,
+    passedOnlyAlone: loadSensitive,
     seconds: Math.round((Date.now() - t0) / 1000), passed, interrupted,
   });
 
