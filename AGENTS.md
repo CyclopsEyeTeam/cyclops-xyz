@@ -68,4 +68,6 @@ version-control ceremony: never ask them about commits, staging, branches or sav
 
 `xyz extract` puts a project's X, Y and Z in one .zip (a backup or a hand-over); only do it when asked.
 
+Arriving in a project that isn't in XYZ yet, or only part-way? Read [MIGRATING.md](MIGRATING.md) (and ask before bringing it in).
+
 `xyz help` lists every command. Every read command accepts `--json`.

@@ -116,7 +116,9 @@ Each project home (`~/XYZ/<project>/`) has a small `xyz.json`:
 
 ## Working with AI agents
 
-XYZ was built to be run by agents as much as by people. [AGENTS.md](AGENTS.md) is a ready-made
+XYZ was built to be run by agents as much as by people. For bringing existing projects in (plain folders,
+git repositories, work in progress, half-finished setups), agents can read [MIGRATING.md](MIGRATING.md).
+[AGENTS.md](AGENTS.md) is a ready-made
 instruction block: copy it into your agent's instructions (for example `~/.codex/AGENTS.md`, a
 project's `AGENTS.md` or `CLAUDE.md`) and agents will look around with `xyz`, sign their own receipts
 and keep `NOTES.md` current. In our first test, an agent told nothing about XYZ found it on its own,
