@@ -9,7 +9,8 @@ import { getReceipt } from './receipts.mjs';
 import { getBlob } from './store.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { nextId, writeReceipt } from './receipts.mjs';
-import { takeTurn } from './queue.mjs';
+import { takeTurn, queueNow } from './queue.mjs';
+import { remoteWhenBusy } from './remote.mjs';
 
 const current = p => { try { return basename(readlinkSync(join(p.x, 'current'))); } catch { return null; } };
 /** Plain number of a version: v1 is the first one ever promoted. */
@@ -64,8 +65,8 @@ export function promote(p, { who = 'agent', saved = false, from = null, lane = n
   const fail = (c, where) => new Error(`check failed${where} ("${p.config.check}", exit ${c.status}); nothing went live.\n${String(c.stdout + c.stderr).trim().split('\n').slice(-15).join('\n')}`);
   const what = lane ? `promote ${lane.id}` : from ? `promote ${from}` : 'promote';
   if (p.config.check && !exact) {
-    const done = takeTurn(p, { label: what, who });
-    let c; try { c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, env: { ...process.env, XYZ_HOME: p.home, XYZ_VERSION: version, XYZ_Y: p.y, XYZ_IN_TURN: p.home }, encoding: 'utf8', maxBuffer: 64 << 20 }); } finally { done(); }
+    const { done, env } = checkTurn(p, what, who);
+    let c; try { c = spawnSync('sh', ['-c', p.config.check], { cwd: p.y, env: { ...process.env, XYZ_HOME: p.home, XYZ_VERSION: version, XYZ_Y: p.y, ...env }, encoding: 'utf8', maxBuffer: 64 << 20 }); } finally { done(); }
     if (c.status !== 0) throw fail(c, '');
   }
   // build the version outside the lock (snapshots and blobs never change); its own tmp folder per process
@@ -82,8 +83,8 @@ export function promote(p, { who = 'agent', saved = false, from = null, lane = n
     writeAtomic(join(tmp, '.xyz'), p.home + '\n'); // scripts find the project (and Z) as they would in Y
     if (p.config.check && exact) {
       // inside the copy, `xyz status` answers for the copy: is it still exactly the saved state?
-      const env = { ...process.env, XYZ_HOME: p.home, XYZ_CHECK_COPY: '1', XYZ_VERSION: version, XYZ_Y: p.y, XYZ_IN_TURN: p.home }; // the check runs in this promote's turn
-      const done = takeTurn(p, { label: what, who });
+      const turn = checkTurn(p, what, who), done = turn.done;
+      const env = { ...process.env, XYZ_HOME: p.home, XYZ_CHECK_COPY: '1', XYZ_VERSION: version, XYZ_Y: p.y, ...turn.env }; // the check runs in this promote's turn
       let c; try { c = spawnSync('sh', ['-c', p.config.check], { cwd: tmp, env, encoding: 'utf8', maxBuffer: 64 << 20 }); } finally { done(); }
       if (c.status !== 0) { rmSync(tmp, { recursive: true, force: true }); throw fail(c, lane ? ` on ${lane.id}'s copy` : ' on the saved copy'); }
     }
@@ -100,6 +101,18 @@ export function promote(p, { who = 'agent', saved = false, from = null, lane = n
     appendFileSync(join(p.x, 'history.jsonl'), JSON.stringify({ at: r.at, kind: 'promote', version, before, receipt: r.id }) + '\n');
     return { ...r, label: `v${n}`, restartFailed: !rs.ok };
   });
+}
+
+// The check's turn: here, in this project's queue — or, when the queue is busy and xyz.json says
+// "tests": { "remote": { "host" or "boat": …, "whenBusy": true } }, on that server instead of waiting (the check's own
+// `xyz test` goes there; if the server can't be reached it takes its turn here after all).
+function checkTurn(p, what, who) {
+  const t = remoteWhenBusy(p);
+  if (t && !process.env.XYZ_IN_TURN && queueNow(p).length) {
+    console.error(`xyz: the check queue is busy; ${what}'s check goes to ${t.label} instead of waiting`);
+    return { done: () => {}, env: { XYZ_TEST_REMOTE: t.id, XYZ_TEST_REMOTE_FALLBACK: '1' } };
+  }
+  return { done: takeTurn(p, { label: what, who }), env: { XYZ_IN_TURN: p.home } };
 }
 
 /** Go back to what was live before the current version was promoted. */

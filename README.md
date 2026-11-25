@@ -106,7 +106,7 @@ xyz convert ~/Documents/MyWebsite   # a git folder: keeps its story
 | `xyz save "why"` | Keep how Y is now, with a receipt saying why. `--learned "<tip>"` leaves a line in the map. |
 | `xyz receipts [n]` / `xyz show r-0042` | The latest receipts / one receipt in full. |
 | `xyz undo r-0042` | Reverse just that change (shows what it will do and asks; `--yes` for scripts). |
-| `xyz test [files]` | Run the project's tests side by side; a file unchanged since it last passed counts from the shared buffer (see below). |
+| `xyz test [files]` | Run the project's tests side by side; a file unchanged since it last passed counts from the shared buffer (see below). `--remote` runs them on another machine over SSH (or a Boat sandbox). |
 | `xyz try "<command>"` | Run a command on a copy of Y in RAM (`/dev/shm`), then throw the copy away. |
 | `xyz promote` / `xyz rollback` | Make Y the live version in X / go back to the previous one. |
 | `xyz watch` | Save every project that changed and refresh its map (the auto-saver runs this). |
@@ -206,6 +206,67 @@ program, needs `strace`) or `none` (no buffer: just side by side and fresh state
 test depends on that the recorder cannot see, such as a wrapper script. `xyz help test` lists the rest
 (`saltEnv`, `unsetEnv`, `env`, `ignore`, `scratch`, `memoryMax`). What it asks of your tests: one command runs
 one file, files don't depend on each other, and nothing leans on the clock or the network beyond the max age.
+
+### Full suites on another machine: `xyz test --remote`
+
+A full suite can run on another computer: a spare PC, a cloud server, or a [Boat](https://boat.dev)
+sandbox. Your own machine stays free, and two full checks can run at once, one here and one there.
+There is nothing to register and no XYZ server to install. XYZ reaches the other machine over SSH and
+copies over what it needs.
+
+**What the other machine needs:** you can `ssh` into it without a password (an SSH key), and it has
+`sh` and `rsync`. That's all. XYZ sends itself and your Node binary along. If the server's system can't
+run that Node (different CPU, or an older Linux), it uses the server's own `node`. On your machine you
+need `rsync` and `ssh`, or the `boat` CLI, signed in, for a Boat.
+
+**Set it up once per project**, in the project's `xyz.json`:
+
+```json
+"tests": {
+  "remote": { "host": "me@my-server" }
+}
+```
+
+`host` is anything `ssh` accepts: `user@address`, or a name from your `~/.ssh/config`. For a Boat
+sandbox, use `"boat": "bx_abc123"` instead; XYZ goes through `boat ssh`, wakes the sandbox if it's
+stopped, and keeps it on for the run.
+
+**Then:**
+
+```bash
+xyz test --remote               # the whole suite on that machine
+xyz test --remote=me@other-box  # or on another one, just this time
+xyz test --local                # never remote, whatever the settings say
+```
+
+The first run sends everything (and Node, about 100 MB); after that only changes travel, and a run
+where nothing changed takes seconds. The server keeps its own test buffer and its own queue (one full
+suite per project at a time) under `~/xyz-remote/`. Delete that folder to clean up.
+
+**Two more settings:**
+
+```json
+"remote": {
+  "host": "me@my-server",
+  "whenBusy": true,
+  "localOnly": ["tests/desktop-*.test.mjs", "tests/gpu.test.mjs"]
+}
+```
+
+- `whenBusy`: when another agent's full suite is already running here, a whole-suite `xyz test` or
+  a promote's check goes to the server instead of waiting. If the server can't be reached, it waits
+  here as before.
+- `localOnly`: test files that need *this* machine: its drives, installed apps, a display or a GPU.
+  These run here while everything else runs there, both at once. Together they are the whole suite, and
+  `xyz arrive` shows one result, e.g. `Tests: passed 7,720 · split: 26 here, 710 on me@my-server`.
+
+**Where results go:** a run that was entirely remote is kept separately (`Z/tests/last-remote.json`,
+the "Remote run" line in `xyz arrive`). A server without your drives or tools can't make your suite
+look broken, and a pass there can't make it look fine. A split run is the whole suite, so it is your
+suite's result. A promote check run remotely counts as the promote check.
+
+**Finding out what needs your machine:** run `xyz test --remote` once. Files that fail there and pass
+here are your `localOnly` list, or paths worth fixing.
 
 ## FAQ
 

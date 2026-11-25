@@ -17,8 +17,15 @@
 //     "recorder": "node",                       how a file's footprint is seen: "node" (Node processes, fast), "strace"
 //                                               (any language, every process; needs strace, ~10–30% slower) or "none"
 //                                               (no buffer: just side by side, fresh state each, failures judged alone)
-//     "jobs": 6, "maxAgeHours": 24, "memoryMax": "20G"
+//     "jobs": 6, "maxAgeHours": 24, "memoryMax": "20G",
+//     "remote": { "host": "me@server", "whenBusy": true, "localOnly": ["tests/gui-*.test.mjs"] }
+//                                               another machine over SSH ("boat": "bx_…" for a Boat sandbox); see below
 //   }
+//
+// Remote (src/remote.mjs): `xyz test --remote[=me@server|bx_…]` sends the tree, XYZ and this Node there with rsync and
+// runs the suite with that machine's own buffer and queue; the result lands in last-remote.json, never last.json.
+// whenBusy goes there instead of waiting for the queue here; localOnly files run here at the same time (a split run,
+// whose merged result is the suite's own last.json). --local never goes remote.
 //
 // What it asks of the tests: one command runs one test file; files are independent of each other given fresh state; and
 // nothing relies on the clock or the network beyond what the max age covers. (Prior art for the idea: Go's test cache,
@@ -50,7 +57,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { RECORDER_IMPORT, RECORDER_URL } from './footprint.mjs';
-import { takeTurn } from './queue.mjs';
+import { takeTurn, queueNow } from './queue.mjs';
+import { remoteAsked, remoteWhenBusy, runRemote, localOnlyOf } from './remote.mjs';
 
 const VERSION = 2;
 
@@ -101,7 +109,9 @@ function settings(p, root, flags, files) {
   const num = (v, d) => Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d;
   const writable = d => { try { fs.accessSync(d, fs.constants.W_OK); return fs.statSync(d).isDirectory(); } catch { return false; } };
   const scratch = [process.env.XYZ_TEST_SCRATCH, c.scratch].find(d => d && writable(d)) || os.tmpdir();
-  const all = findFiles(root, c.files ?? 'tests/*.test.mjs');
+  // skipFiles: files this run never counts (a remote's share of a split run leaves out the localOnly files)
+  const skip = [c.skipFiles ?? []].flat();
+  const all = findFiles(root, c.files ?? 'tests/*.test.mjs').filter((f) => !skip.some((pat) => globRe(pat).test(f)));
   return {
     c, root, p, scratch, all,
     files: files.length ? files.map(f => path.relative(root, path.resolve(f))) : all,
@@ -293,7 +303,7 @@ function readFootprint(file, toKey, extra = '') {
 }
 
 // The latest whole-suite run, for `xyz arrive` / `xyz lanes` and the next agent. Best effort: a run never fails over it.
-function writeStatus(s, who, result) {
+function writeStatus(s, who, result, remote = false) {
   // Only whole-suite runs: a spot check of two files must never read as "the suite passed".
   if (!sameFiles(s.files, s.all)) return;
   let lane = null;
@@ -302,10 +312,16 @@ function writeStatus(s, who, result) {
   if (lane?.id) { try { laneWho = JSON.parse(fs.readFileSync(path.join(s.p.z, 'lanes', lane.id, 'lane.json'), 'utf8')).who; } catch { /* unknown */ } }
   // Where we stand decides, not only an inherited variable: a project's own tests can run xyz inside a check.
   const tree = lane?.id ? `lane ${lane.id}` : s.root === s.p.y ? 'Y' : process.env.XYZ_CHECK_COPY ? 'check' : s.root;
-  const status = { at: new Date().toISOString(), who: who || laneWho || null, version: process.env.XYZ_VERSION || null, tree, full: s.full, ...result };
+  const status = remote
+    ? { ...result, who: who || laneWho || result.who || null, version: process.env.XYZ_VERSION || null, tree }
+    : { at: new Date().toISOString(), who: who || laneWho || null, version: process.env.XYZ_VERSION || null, tree, full: s.full, ...result };
   try {
     fs.mkdirSync(s.status, { recursive: true });
-    for (const name of tree === 'check' ? ['last.json', 'last-check.json'] : ['last.json']) {
+    // A remote run has its own file: a machine without this one's paths or tools must not repaint the suite here as
+    // failed (or passed). Its promote checks still count as the promote check.
+    const names = remote ? ['last-remote.json'] : ['last.json'];
+    if (tree === 'check') names.push('last-check.json');
+    for (const name of names) {
       const tmp = path.join(s.status, `${name}.${process.pid}.tmp`);
       fs.writeFileSync(tmp, JSON.stringify(status, null, 2) + '\n');
       fs.renameSync(tmp, path.join(s.status, name));
@@ -350,16 +366,72 @@ export async function testCli({ p, rest, flags, who, fail }) {
   for (const f of s.files) if (!fs.existsSync(path.join(root, f))) fail(`no test file ${f} in ${root}`);
   if (!['node', 'strace', 'none'].includes(s.recorder)) fail(`xyz.json tests.recorder is "${s.recorder}"; it can be "node", "strace" or "none"`);
   if (s.recorder === 'strace' && spawnSync('strace', ['-V'], { stdio: 'ignore' }).status !== 0) fail('tests.recorder is "strace" but strace is not installed (sudo apt install strace), or use "node" / "none"');
+  // a memory cap wraps the whole command (the remote part too), once
+  const scoped = inMemoryScope(s);
+  if (scoped !== null) { process.exitCode = scoped; return; }
   // one full suite at a time per project (a promote's own check already holds the turn); spot checks don't wait
   // XYZ_VERSION is set only for a promote's own check, which already holds the turn
-  const giveBack = sameFiles(s.files, s.all) && !flags['no-wait'] && !process.env.XYZ_VERSION ? takeTurn(p, { label: `xyz test${s.full ? ' --full' : ''} in ${path.basename(root)}`, who }) : () => {};
+  const whole = sameFiles(s.files, s.all);
+  // Remote when asked (--remote, XYZ_TEST_REMOTE), or when the queue here is busy and the project says whenBusy
+  // (a promote's check sets XYZ_TEST_REMOTE itself when it went there instead of waiting).
+  let target = remoteAsked(p, flags, fail);
+  const queued = whole && !flags['no-wait'] && !process.env.XYZ_VERSION;
+  const busy = !target && queued && !flags.local && queueNow(p).length ? remoteWhenBusy(p) : null;
+  if (busy) { console.error(`xyz: the full-suite queue here is busy; going to ${busy.label} instead of waiting`); target = busy; }
+  const fallback = process.env.XYZ_TEST_REMOTE_FALLBACK === '1';
+  if (fallback) delete process.env.XYZ_TEST_REMOTE_FALLBACK;
+  if (target) {
+    const pats = localOnlyOf(p);
+    const here = whole ? s.all.filter((f) => matchAny(f, pats)) : [];
+    if (here.length && here.length < s.all.length) {
+      // split: the files that need this machine run here while the rest run there; together, the whole suite
+      console.error(`xyz: split run: ${here.length} file${here.length === 1 ? '' : 's'} here (localOnly), ${s.all.length - here.length} on ${target.label}`);
+      const prefix = `[${target.label}] `;
+      const [r, mine] = await Promise.all([
+        runRemote(s, { p, target, who, whole: true, localOnly: pats, prefix }),
+        runSuite({ ...s, files: here }, { p, flags, who, fail, label: 'here' }),
+      ]);
+      if (!r) {
+        if (!busy && !fallback) { console.error(`xyz: ${target.label} couldn't be reached; only the localOnly files ran`); process.exitCode = 1; return; }
+        console.error('xyz: running the rest here instead');
+        const rest = await runSuite({ ...s, files: s.all.filter((f) => !here.includes(f)) }, { p, flags, who, fail, label: 'here' });
+        writeStatus(s, who, merge(mine, rest, 'here'));
+        process.exitCode = mine.passed && rest.passed ? 0 : 1;
+        return;
+      }
+      const there = r.status ?? { files: s.all.length - here.length, tests: 0, pass: 0, fail: 0, passed: false, failedFiles: [], lost: true };
+      writeStatus(s, who, merge(mine, there, `${here.length} here, ${s.all.length - here.length} on ${target.label}`));
+      process.exitCode = mine.passed && r.code === 0 ? 0 : 1;
+      return;
+    }
+    const r = await runRemote(s, { p, target, who, whole });
+    if (r) {
+      if (whole && r.status) writeStatus(s, who, { ...r.status, where: target.label }, true);
+      process.exitCode = r.code;
+      return;
+    }
+    if (!busy && !fallback) { process.exitCode = 1; return; }
+    console.error('xyz: running here instead, in turn');
+  }
+  const giveBack = queued || (target && !process.env.XYZ_IN_TURN) ? takeTurn(p, { label: `xyz test${s.full ? ' --full' : ''} in ${path.basename(root)}`, who }) : () => {};
   try { await runSuite(s, { p, flags, who, fail }); } finally { giveBack(); }
 }
 
+// Two parts of one whole suite (split runs) as one status.
+function merge(a, b, where) {
+  const sum = (k) => (a[k] || 0) + (b[k] || 0);
+  return {
+    files: sum('files'), ran: sum('ran'), fromBuffer: sum('fromBuffer'), notRun: sum('notRun'),
+    tests: sum('tests'), pass: sum('pass'), fail: sum('fail'),
+    failedFiles: [...(a.failedFiles ?? []), ...(b.failedFiles ?? [])], failedLoad: { ...(a.failedLoad ?? {}), ...(b.failedLoad ?? {}) },
+    cores: a.cores, passedOnlyAlone: sum('passedOnlyAlone'), seconds: Math.max(a.seconds || 0, b.seconds || 0),
+    passed: !!(a.passed && b.passed), interrupted: !!(a.interrupted || b.interrupted), where: `split: ${where}`,
+  };
+}
+const matchAny = (file, patterns) => patterns.some((pat) => globRe(pat).test(file));
+
 async function runSuite(s, { p, flags, who, fail }) {
   const root = s.root;
-  const scoped = inMemoryScope(s);
-  if (scoped !== null) { process.exitCode = scoped; return; }
 
   const { toKey, fromKey } = keyer(root);
   const salt = saltOf(s);
@@ -465,6 +537,7 @@ async function runSuite(s, { p, flags, who, fail }) {
   const onSignal = () => { interrupted = true; halted = true; stopAll(); };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal); // a remote run whose connection dropped
 
   const runAlone = async (task) => {
     task.quiet = await waitForQuiet(say);
@@ -514,17 +587,19 @@ async function runSuite(s, { p, flags, who, fail }) {
   say(`# from the buffer ${fromBuffer.length} files: ${projected.tests} tests, ${projected.pass} pass (unchanged since they passed)`);
   if (notRun.length) say(`# not run (stopped): ${notRun.length} files`);
   say(`# suite: ${total.tests + projected.tests} tests, ${total.pass + projected.pass} pass, ${total.fail} fail · ${((Date.now() - t0) / 1000).toFixed(0)}s · ${passed ? 'passed' : 'NOT PASSED'}`);
-  writeStatus(s, who, {
+  const result = {
     files: s.files.length, ran: ran.length, fromBuffer: fromBuffer.length, notRun: notRun.length,
     tests: total.tests + projected.tests, pass: total.pass + projected.pass, fail: total.fail,
     failedFiles: failed.map(([file]) => file), failedLoad: Object.fromEntries(failed.map(([file, r]) => [file, r.load])), cores: CORES,
     passedOnlyAlone: loadSensitive,
     seconds: Math.round((Date.now() - t0) / 1000), passed, interrupted,
-  });
+  };
+  writeStatus(s, who, result);
 
   if (process.env.XYZ_TEST_KEEP === '1') say(`# kept ${work}`);
   else { try { fs.rmSync(work, { recursive: true, force: true }); } catch (error) { console.error(`# could not remove ${work}: ${error.message}`); } }
   if (log !== null) fs.closeSync(log);
-  process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
+  process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal); process.removeListener('SIGHUP', onSignal);
   process.exitCode = interrupted ? 130 : failed.length || notRun.length ? 1 : 0;
+  return result;
 }

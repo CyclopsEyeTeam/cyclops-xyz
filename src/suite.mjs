@@ -31,6 +31,7 @@ export function suiteLine(r, label = 'Suite') {
   const when = ago(r.at); if (when) bits.push(when);
   const where = [r.who, r.tree, /^v?\d+$/.test(String(r.version ?? '')) && `on v${String(r.version).replace(/^v/, '')}`].filter(Boolean).join(', ');
   if (where) bits.push(where);
+  if (r.where) bits.push(String(r.where).startsWith('split') ? r.where : `on ${r.where}`);
   return `${label}: ${bits.join(' · ')}`;
 }
 
@@ -40,5 +41,7 @@ export function suiteLines(p) {
   const out = [];
   if (last) out.push(suiteLine(last, 'Tests'));
   if (check && !(last && last.at === check.at && last.tree === check.tree)) out.push(suiteLine(check, 'Promote check'));
+  const boat = read(p, 'last-remote.json');
+  if (boat && !(check && check.at === boat.at)) out.push(suiteLine(boat, 'Remote run'));
   return out;
 }

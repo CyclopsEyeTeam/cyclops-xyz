@@ -20,6 +20,6 @@ import { spawnSync } from 'node:child_process';
 const BIN = new URL('../bin/xyz.mjs', import.meta.url).pathname;
 /** Run the real xyz command with its own root and RAM folder. */
 export function xyz(root, args, { cwd = root, env = {} } = {}) {
-  const r = spawnSync(process.execPath, [BIN, ...args], { cwd, encoding: 'utf8', env: { ...process.env, XYZ_CHECK_COPY: '', XYZ_VERSION: '', XYZ_HOME: '', XYZ_Y: '', XYZ_IN_TURN: '', XYZ_ROOT: root, XYZ_RAM: join(root, '.ram'), XYZ_WHO: '', ...env } });
+  const r = spawnSync(process.execPath, [BIN, ...args], { cwd, encoding: 'utf8', env: { ...process.env, XYZ_CHECK_COPY: '', XYZ_VERSION: '', XYZ_HOME: '', XYZ_Y: '', XYZ_IN_TURN: '', XYZ_TEST_REMOTE: '', XYZ_TEST_REMOTE_FALLBACK: '', XYZ_REMOTE_SHELL: '', XYZ_ROOT: root, XYZ_RAM: join(root, '.ram'), XYZ_WHO: '', ...env } });
   return { code: r.status, out: r.stdout + r.stderr };
 }

@@ -30,6 +30,7 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz try "<command>"      run a command on a copy of Y in RAM, then clean up  e.g. xyz try "node --test"
   xyz test [files]         run the project's tests side by side; files unchanged since they passed count from the buffer
                            (--full, --bail, --jobs N, --log FILE; set up in xyz.json "tests", see xyz help test)
+                           (--remote: on another machine over SSH or a Boat, set in xyz.json tests.remote · --local: never remote)
   xyz promote              check Y, then make it the live version in X
                            (--saved: only what's kept, checked on that copy · xyz promote r-0042: that receipt's state
                             · xyz promote L7, or xyz promote inside a lane: what's live + only that lane's work)
@@ -49,7 +50,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours', 'no-wait']);
+const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours', 'no-wait', 'remote', 'local']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
