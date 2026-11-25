@@ -122,8 +122,9 @@ const sha = (data) => crypto.createHash('sha1').update(data).digest('hex').slice
 const BIG = 16 * 1024 * 1024;
 
 // Paths inside the tree are kept relative, so a pass recorded in a lane or a check copy counts in Y and back.
-const keyer = (root) => ({
-  toKey: (kind, abs) => { const rel = path.relative(root, abs); return kind + (rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs); },
+// The root itself is '.', so a test that lists the tree root matches across Y, lanes and check copies.
+export const keyer = (root) => ({
+  toKey: (kind, abs) => { const rel = path.relative(root, abs); return kind + (rel === '' ? '.' : !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs); },
   fromKey: (key) => { const p = key.slice(1); return [key[0], path.isAbsolute(p) ? p : path.join(root, p)]; },
 });
 

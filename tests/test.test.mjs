@@ -93,3 +93,13 @@ test('a busy machine: fewer jobs at the start, a bounded wait for quiet before j
   assert.equal(last.failedLoad['tests/c.test.mjs'], 100);
   assert.match(xyz(root, ['arrive'], { cwd: y }).out, /Tests: FAILED 1 \(tests\/c\.test\.mjs\) under load 100 on \d+ cores/);
 });
+
+test('the tree root itself is kept as ".", so a pass that listed the root counts in another copy of the tree', async () => {
+  const { keyer } = await import('../src/test.mjs');
+  const y = keyer('/w/Y'), check = keyer('/w/X/versions/s-1.tmp');
+  const key = check.toKey('d', '/w/X/versions/s-1.tmp');
+  assert.equal(key, 'd.');
+  assert.deepEqual(y.fromKey(key), ['d', '/w/Y']);
+  assert.equal(check.toKey('f', '/w/X/versions/s-1.tmp/src/a.js'), 'fsrc/a.js');
+  assert.equal(check.toKey('f', '/elsewhere/x'), 'f/elsewhere/x');
+});
