@@ -56,7 +56,9 @@ the auto-saver and the menu items. Uninstalling never touches your projects or t
 `desktop/xyz-manager.py` (in the app menu as **XYZ Manager** after `./install.sh`) shows every project on one
 screen, most recently changed first: its description, what's live, unsaved files and open lanes, and its latest
 receipt. Each project has buttons to open its **Source (Y)**, **Live (X)** and **Memory (Z)** folders, its notes,
-and **Extract .zip**. It only reads and extracts; it never saves, promotes or changes a project. Projects are
+a **Terminal** (opened in Y for a library project, in the project's own folder for a single one) and
+**Extract .zip**. **New project** in its header makes a library project. It never saves, promotes or changes a
+project. Projects are
 ordered by last activity (receipts, signed edits, lanes, unsaved files) and the list refreshes itself. Needs
 Python 3 with GTK 3 (standard on Mint, Ubuntu and Fedora desktops).
 

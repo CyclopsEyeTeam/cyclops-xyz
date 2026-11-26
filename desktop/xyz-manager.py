@@ -91,6 +91,20 @@ def open_path(path):
     subprocess.Popen(['xdg-open', str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def terminal_dir(p):
+    """Where a terminal for this project starts: a single project's own folder, a library project's Y."""
+    return Path(p['home']) if p.get('layout') == 'single' else Path(p['y'])
+
+
+def open_terminal(path):
+    # the desktop's own terminal first (Debian/Mint alternative), then the common ones
+    for t in ('x-terminal-emulator', 'gnome-terminal', 'xfce4-terminal', 'konsole', 'kitty', 'alacritty', 'xterm'):
+        if shutil.which(t):
+            subprocess.Popen([t], cwd=str(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return True
+    return False
+
+
 CSS = b"""
 window, .background, list, row, scrolledwindow, viewport { background-color: #090f19; color: #e2edf4; }
 headerbar { background: #0d1523; border-bottom: 1px solid #1d2b40; color: #e2edf4; }
@@ -287,6 +301,8 @@ class Manager(Gtk.Window):
         button('Memory (Z)', p['z'], lambda b: open_path(p['z']))
         notes = Path(p['z']) / 'NOTES.md'
         button('Notes', str(notes), lambda b: open_path(notes), notes.exists())
+        tdir = terminal_dir(p)
+        button('Terminal', f"Open a terminal in {tdir}", lambda b: self.terminal(tdir))
         button('Extract .zip', f"X, Y and Z in one .zip, to {ROOT / 'exports'}", lambda b: self.extract(p, b))
         outer.pack_start(buttons, False, False, 2)
         return row
@@ -309,9 +325,15 @@ class Manager(Gtk.Window):
         self.load()
         m = Gtk.MessageDialog(transient_for=self, message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.NONE, text=f"{r['name']} is ready")
         m.format_secondary_text(f"Work in {Path(r['home']) / 'Y'}")
-        m.add_button('Open Y', 1); m.add_button('Close', 0)
-        if m.run() == 1: open_path(Path(r['home']) / 'Y')
-        m.destroy()
+        m.add_button('Open Y', 1); m.add_button('Terminal in Y', 2); m.add_button('Close', 0)
+        a = m.run(); m.destroy()
+        if a == 1: open_path(Path(r['home']) / 'Y')
+        elif a == 2: self.terminal(Path(r['home']) / 'Y')
+
+    def terminal(self, path):
+        if not open_terminal(path):
+            m = Gtk.MessageDialog(transient_for=self, message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE, text="No terminal found")
+            m.format_secondary_text(f"Install one (gnome-terminal, xfce4-terminal, konsole…), or open {path} by hand."); m.run(); m.destroy()
 
     def extract(self, p, button):
         button.set_sensitive(False); button.set_label('Extracting…')
