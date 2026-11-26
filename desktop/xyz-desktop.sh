@@ -1,6 +1,6 @@
 #!/bin/sh
 # Right-click helpers for the desktop and file manager (Nemo actions).
-#   xyz-desktop.sh new <folder>     ask for a name, make <folder>/<Name> with X, Y, Z
+#   xyz-desktop.sh new <folder>     ask for a name, make <folder>/<Name> as a single project (the folder is X, with Y/ and Z/ inside)
 #   xyz-desktop.sh adopt <folder>   bring a folder into XYZ (git folders are converted, keeping their story)
 HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 NODE=${XYZ_NODE:-$(command -v node)}
@@ -14,8 +14,8 @@ case "$1" in
     here="$2"; [ -d "$here" ] || here="$HOME/Desktop"
     name=$(zenity --entry --title="New XYZ project" --text="What's it called?" --entry-text="" 2>/dev/null) || exit 0
     [ -n "$name" ] || exit 0
-    out=$("$NODE" "$XYZ" new "$name" --at "$here" --yes 2>&1) || { oops "$out"; exit 1; }
-    say "$name is ready: work in Y"
+    out=$("$NODE" "$XYZ" new "$name" --single --at "$here" --yes 2>&1) || { oops "$out"; exit 1; }
+    say "$name is ready: one folder, work in its Y"
     nemo "$here/$name" >/dev/null 2>&1 &
     ;;
   adopt)

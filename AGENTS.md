@@ -12,6 +12,11 @@ Projects are kept with **XYZ** instead of git commits. Every project has three p
 history and one `NOTES.md`). One command, `xyz`, does everything. The person you work for does not want
 version-control ceremony: never ask them about commits, staging, branches or saving.
 
+**Starting something new**
+- A brand-new project starts with its XYZ home, before any code: `xyz create <Name>` (library, in ~/XYZ),
+  then work in the `Y` folder it prints. In a sandbox kept to one folder: `xyz new <Name> --single` there,
+  and work in `<Name>/Y`. Don't make a plain folder first and bring it in afterwards.
+
 **When you arrive**
 - First, `xyz list` (every project, its latest change, what's live), then `xyz` and `xyz arrive` in the project (where X, Y and Z are, what's unsaved, the brief); tell the person what you see.
 - A single project (one folder that is X, with `Y/` and `Z/` inside) can be worked from its folder: edit in `Y/`; every `xyz` command works from there.

@@ -136,6 +136,10 @@ class Manager(Gtk.Window):
         exports.set_tooltip_text(f'Open {ROOT / "exports"} (where extracts go)')
         exports.connect('clicked', lambda *_: (ROOT / 'exports').mkdir(parents=True, exist_ok=True) or open_path(ROOT / 'exports'))
         hb.pack_end(exports)
+        create = Gtk.Button(label='New project')
+        create.set_tooltip_text(f'Start a new project in the library ({ROOT}): X, Y and Z side by side')
+        create.connect('clicked', lambda *_: self.create())
+        hb.pack_end(create)
 
         settings = Gtk.Settings.get_default()
         if settings: settings.set_property('gtk-application-prefer-dark-theme', True)
@@ -286,6 +290,28 @@ class Manager(Gtk.Window):
         button('Extract .zip', f"X, Y and Z in one .zip, to {ROOT / 'exports'}", lambda b: self.extract(p, b))
         outer.pack_start(buttons, False, False, 2)
         return row
+
+    def create(self):
+        d = Gtk.Dialog(title='New project', transient_for=self, modal=True)
+        d.add_button('Cancel', Gtk.ResponseType.CANCEL); d.add_button('Create', Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        area = d.get_content_area(); area.set_spacing(8); area.set_border_width(14)
+        area.add(Gtk.Label(label=f'What is it called? It goes in the library: {ROOT}/<Name>/X, Y, Z', xalign=0))
+        entry = Gtk.Entry(activates_default=True); area.add(entry)
+        d.show_all()
+        name = entry.get_text().strip() if d.run() == Gtk.ResponseType.OK else ''
+        d.destroy()
+        if not name: return
+        try: r = json.loads(xyz('create', name, '--json'))
+        except Exception as e:
+            m = Gtk.MessageDialog(transient_for=self, message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE, text=f"{name} couldn't be made")
+            m.format_secondary_text(str(e)); m.run(); m.destroy(); return
+        self.load()
+        m = Gtk.MessageDialog(transient_for=self, message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.NONE, text=f"{r['name']} is ready")
+        m.format_secondary_text(f"Work in {Path(r['home']) / 'Y'}")
+        m.add_button('Open Y', 1); m.add_button('Close', 0)
+        if m.run() == 1: open_path(Path(r['home']) / 'Y')
+        m.destroy()
 
     def extract(self, p, button):
         button.set_sensitive(False); button.set_label('Extracting…')

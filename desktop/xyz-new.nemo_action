@@ -1,7 +1,7 @@
 [Nemo Action]
 Active=true
 Name=Create XYZ project here
-Comment=Make a new project with X (live), Y (source) and Z (memory)
+Comment=Make a new single project here: the folder is X (live), with Y (source) and Z (memory) inside
 Exec=env XYZ_NODE=@NODE@ @XYZ_HOME@/desktop/xyz-desktop.sh new %P
 Icon-Name=folder-new
 Selection=None

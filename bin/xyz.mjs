@@ -7,7 +7,7 @@ import { save } from '../src/save.mjs';
 import { listReceipts, getReceipt, markdown } from '../src/receipts.mjs';
 import { projectView, projectInfo, listView, listInfo } from '../src/view.mjs';
 
-const COMMANDS = ['extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'test', 'promote', 'rollback', 'list', 'watch', 'help'];
+const COMMANDS = ['create', 'extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes', 'land', 'drop', 'new', 'adopt', 'convert', 'save', 'status', 'receipts', 'show', 'undo', 'try', 'test', 'promote', 'rollback', 'list', 'watch', 'help'];
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
@@ -20,7 +20,8 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz drop [L2] --yes      close a lane without landing (its last state stays in Z)
   xyz extract [project]    X, Y and Z in one .zip (to ~/XYZ/exports/; --to <file|folder>, --with-live)
   xyz list                 every project, with its latest receipt
-  xyz new <Name>           start a new project with X, Y and Z, kept in the library (~/XYZ)   (--at <folder> to make it there)
+  xyz create <Name>        start a new project with X, Y and Z, kept in the library (~/XYZ)   (xyz new is the same;
+                           --at <folder> to make it there)
                            --single: one folder made here that is X (live), with Y/ and Z/ inside it
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
   xyz convert <folder>     bring a git folder in, keeping its story    (--dry-run to only look · --all [folder] · --include-online)
@@ -148,8 +149,8 @@ async function main() {
       return out({ name: p.name, map: mapFile(p), text }, text.trimEnd());
     }
     case 'list': return out(listInfo(), listView());
-    case 'new': {
-      if (!rest[0]) fail('give it a name: xyz new <Name>');
+    case 'new': case 'create': {
+      if (!rest[0]) fail(`give it a name: xyz ${cmd} <Name>`);
       const p = newProject(rest.join(' '), { at: flags.at ?? null, who: who(), single: !!flags.single });
       const how = p.layout === 'single' ? `\n  One folder: ${p.home} is X (live), with Y and Z inside it.` : '';
       return out({ name: p.name, home: p.home, layout: p.layout }, `${p.name} is ready.${how}\n  Y (work here): ${p.y}\n  X (live):      ${p.x}\n  Z (memory):    ${p.z}`);

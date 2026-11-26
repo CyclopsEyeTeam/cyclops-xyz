@@ -67,7 +67,7 @@ an ASCII eye stands in.
 ## Your first project
 
 ```sh
-xyz new HelloXYZ
+xyz create HelloXYZ
 cd ~/XYZ/HelloXYZ/Y
 printf 'Hello, XYZ!\n' > hello.txt
 xyz save "Added a first greeting"
@@ -82,9 +82,10 @@ the same for any project (`xyz hello`, `xyz --hello-xyz` and `xyz HelloXYZ` all 
 
 There are two ways to lay a project out. Pick one per project when you make it.
 
-- **Library** (the default, `xyz new HelloXYZ`): every project lives in one XYZ folder, `~/XYZ`, and each
+- **Library** (the default: `xyz create HelloXYZ`, or **New project** in the XYZ Manager): every project lives in one XYZ folder, `~/XYZ`, and each
   one has `X/`, `Y/` and `Z/` side by side: `~/XYZ/HelloXYZ/{X,Y,Z}`.
-- **Single** (`xyz new HelloXYZ --single`): one folder, made where you are, holds everything. The folder
+- **Single** (`xyz new HelloXYZ --single`, or right-click in a folder → **Create XYZ project here**): one
+  folder, made where you are, holds everything. The folder
   you make *is* X, the live app (`current` points at the live version, with the versions beside it).
   Y and Z are folders inside it:
 
@@ -163,6 +164,18 @@ instruction block: copy it into your agent's instructions (for example `~/.codex
 project's `AGENTS.md` or `CLAUDE.md`) and agents will look around with `xyz`, sign their own receipts
 and keep `NOTES.md` current. In our first test, an agent told nothing about XYZ found it on its own,
 read the notes, did its job and signed its receipt.
+
+### A brand-new project: the agent creates it first
+
+When you ask an agent for something new, its first step is to make the XYZ project, before writing any
+code, so every file it writes is kept from the start:
+
+```sh
+xyz create MyNewThing              # library: ~/XYZ/MyNewThing/{X,Y,Z}; then work in its Y
+xyz new MyNewThing --single        # or, in a sandbox: one folder here, work in MyNewThing/Y
+```
+
+A line you can paste: *"New project: start by running `xyz create <Name>` and build it in its Y."*
 
 ### Start every session the same way
 

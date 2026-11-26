@@ -72,3 +72,10 @@ test('a project by name in several words: xyz cyclops cli finds CyclopsCLI, and 
   r = xyz(root, ['cyclops']);
   assert.equal(r.code, 1); assert.match(r.out, /could be CyclopsCLI, CyclopsChat/);
 });
+
+test('xyz create is a new library project', () => {
+  const root = tmp('root-');
+  const r = xyz(root, ['create', 'Fresh', 'Start']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(readdirSync(join(root, 'Fresh Start')).sort(), ['X', 'Y', 'Z', 'xyz.json']);
+});
