@@ -2,7 +2,7 @@
 // unzipping it into the XYZ root (~/XYZ) gives back a working project with its whole memory.
 // Y is taken as it is now (same skip rules as a save); Z whole (receipts, snapshots, store, notes, map, lanes);
 // X as its history (every live version can be rebuilt from Z) — or, with --with-live, the live version too.
-import { mkdtempSync, mkdirSync, symlinkSync, copyFileSync, writeFileSync, existsSync, readdirSync, lstatSync, readlinkSync, statSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, copyFileSync, writeFileSync, readFileSync, existsSync, readdirSync, lstatSync, readlinkSync, statSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -54,7 +54,8 @@ export function extract(p, { to = null, withLive = false } = {}) {
   try {
     mkdirSync(join(top, 'X'), { recursive: true });
     symlinkSync(yReal, join(top, 'Y')); symlinkSync(p.z, join(top, 'Z'));
-    copyFileSync(join(p.home, 'xyz.json'), join(top, 'xyz.json'));
+    // the export is always laid out as a library home (X/, Y/, Z/ side by side), whatever the project's own layout
+    { const c = JSON.parse(readFileSync(join(p.home, 'xyz.json'), 'utf8')); delete c.layout; writeFileSync(join(top, 'xyz.json'), JSON.stringify(c, null, 2) + '\n'); }
     if (existsSync(join(p.x, 'history.jsonl'))) copyFileSync(join(p.x, 'history.jsonl'), join(top, 'X', 'history.jsonl'));
     const list = ['xyz.json', 'README-XYZ.txt', ...(existsSync(join(top, 'X', 'history.jsonl')) ? ['X/history.jsonl'] : [])];
     // Y as it is now, with the same skip rules as a save (no node_modules, databases, logs…)

@@ -22,6 +22,7 @@ export function arriveCli({ query, flags, out, fail }) {
     const extra = [];
     if (here && here.lane.status !== 'open') extra.push(`▸ This is lane ${here.lane.id}'s old folder: it was already ${here.lane.status}. Work in Y (cd ${p.y}) or start a new lane.`);
     else if (here) extra.push(`▸ You are in lane ${here.lane.id} ("${here.lane.why}", ${here.lane.who}). Work here; \`xyz land\` merges it into Y in order.`);
+    if (p.layout === 'single') extra.unshift(`▸ Single project: this folder (${p.home}) is X, the live app; Y/ is where you work, Z/ is memory. You can stay in this folder: every xyz command works from here, and edits go in Y/.`);
     let suite = []; try { suite = suiteLines(p); } catch {}
     if (suite.length) extra.push(`▸ ${suite.join('\n  ')}`);
     if (lanes.length) extra.push(`▸ Open lanes (other agents at work)\n${lanes.join('\n')}`);

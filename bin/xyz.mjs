@@ -11,7 +11,7 @@ const COMMANDS = ['extract', 'changed', 'touch', 'arrive', 'map', 'lane', 'lanes
 const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
 
   xyz                      everything about the project you're in (or the list, if you're not in one)
-  xyz <project>            everything about one project: xyz my-app · xyz --my-app · xyz app
+  xyz <project>            everything about one project: xyz my-app · xyz --my-app · xyz app · xyz cyclops cli (words are fine)
   xyz arrive               the short arrival brief for an agent (map, notes, what is moving)   (--hook: silent outside projects)
   xyz map [project]        refresh and show the project's map, Z/MAP.md (the auto-saver keeps it fresh)
   xyz lane "why"           your own numbered copy of Y (L1, L2…) so agents never mix their work
@@ -20,7 +20,8 @@ const HELP = `xyz — keep your work as X (live), Y (source) and Z (memory)
   xyz drop [L2] --yes      close a lane without landing (its last state stays in Z)
   xyz extract [project]    X, Y and Z in one .zip (to ~/XYZ/exports/; --to <file|folder>, --with-live)
   xyz list                 every project, with its latest receipt
-  xyz new <Name>           start a new project with X, Y and Z        (--at <folder> to make it there)
+  xyz new <Name>           start a new project with X, Y and Z, kept in the library (~/XYZ)   (--at <folder> to make it there)
+                           --single: one folder made here that is X (live), with Y/ and Z/ inside it
   xyz adopt <folder>       bring a folder in where it is; it becomes Y
   xyz convert <folder>     bring a git folder in, keeping its story    (--dry-run to only look · --all [folder] · --include-online)
   xyz save "why"           keep how Y is now, with a receipt saying why   (--learned "<tip>" adds a line to the map)
@@ -50,10 +51,13 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--') && a.length > 2) { const [k, v] = a.slice(2).split(/=(.*)/s); if (v !== undefined) flags[k] = v; else if (VALUE_FLAGS.has(k)) flags[k] = argv[++i]; else flags[k] = true; }
   else pos.push(a);
 }
-const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours', 'no-wait', 'remote', 'local']);
+const KNOWN = new Set(['to', 'with-live', 'saved', 'wait', 'keep', 'learned', 'hook', 'json', 'yes', 'who', 'at', 'all', 'dry-run', 'include-online', 'skip-changed', 'help', 'full', 'bail', 'jobs', 'log', 'max-age-hours', 'no-wait', 'remote', 'local', 'single']);
 const who = () => flags.who || process.env.XYZ_WHO || (process.stdin.isTTY ? 'owner' : 'agent');
 const out = (obj, text) => console.log(flags.json ? JSON.stringify(obj, null, 2) : text);
 const fail = msg => { console.error(`xyz: ${msg}`); process.exit(1); };
+
+/** A project name given as one or more words ("cyclops cli"), or null. */
+const named = (words) => words.join(' ').trim() || null;
 
 function here(query) {
   const p = resolveProject(query);
@@ -99,7 +103,7 @@ async function main() {
   }
   switch (cmd) {
     case undefined: case 'status': {
-      const p = resolveProject(rest[0]);
+      const p = resolveProject(named(rest));
       if (!p) return out(listInfo(), listView());
       return out(projectInfo(p), projectView(p));
     }
@@ -107,9 +111,9 @@ async function main() {
       if (rest[0] === 'test') { const { fileURLToPath } = await import('node:url'); return console.log(readFileSync(fileURLToPath(new URL('../src/test.mjs', import.meta.url)), 'utf8').split('\nimport ')[0].replace(/^\/\/ ?/gm, '')); }
       return console.log(HELP);
     }
-    case 'extract': { const { extractCli } = await import('../src/extract.mjs'); return extractCli({ p: here(rest[0] ?? null), flags, out }); }
+    case 'extract': { const { extractCli } = await import('../src/extract.mjs'); return extractCli({ p: here(named(rest)), flags, out }); }
     case 'changed': {
-      const p = here(rest[0] ?? null), { changesNow, lastWriters } = await import('../src/save.mjs');
+      const p = here(named(rest)), { changesNow, lastWriters } = await import('../src/save.mjs');
       const c = changesNow(p), w = lastWriters(p.z, c.last?.at ?? 0);
       const rows = [...c.changed.map(f => ['~', f]), ...c.added.map(f => ['+', f]), ...c.removed.map(f => ['-', f])].map(([k, f]) => ({ kind: k, file: f, by: w.get(f) ?? null }));
       return out(rows, rows.length ? rows.map(r => `${r.kind} ${r.file}${r.by ? `   — ${r.by}` : '   — (not known)'}`).join('\n') + `\n${rows.length} unsaved file${rows.length === 1 ? '' : 's'}` : 'Nothing unsaved in Y.');
@@ -135,19 +139,20 @@ async function main() {
     }
     case 'arrive': {
       const { arriveCli } = await import('../src/arrive.mjs');
-      return arriveCli({ query: rest[0], flags, out, fail });
+      return arriveCli({ query: named(rest) ?? undefined, flags, out, fail });
     }
     case 'map': {
       const { refreshMap, mapFile } = await import('../src/map.mjs');
-      const p = here(rest[0] ?? null); refreshMap(p);
+      const p = here(named(rest)); refreshMap(p);
       const text = readFileSync(mapFile(p), 'utf8');
       return out({ name: p.name, map: mapFile(p), text }, text.trimEnd());
     }
     case 'list': return out(listInfo(), listView());
     case 'new': {
       if (!rest[0]) fail('give it a name: xyz new <Name>');
-      const p = newProject(rest.join(' '), { at: flags.at ?? null, who: who() });
-      return out({ name: p.name, home: p.home }, `${p.name} is ready.\n  Y (work here): ${p.y}\n  X (live):      ${p.x}\n  Z (memory):    ${p.z}`);
+      const p = newProject(rest.join(' '), { at: flags.at ?? null, who: who(), single: !!flags.single });
+      const how = p.layout === 'single' ? `\n  One folder: ${p.home} is X (live), with Y and Z inside it.` : '';
+      return out({ name: p.name, home: p.home, layout: p.layout }, `${p.name} is ready.${how}\n  Y (work here): ${p.y}\n  X (live):      ${p.x}\n  Z (memory):    ${p.z}`);
     }
     case 'adopt': {
       if (!rest[0]) fail('which folder? xyz adopt <folder>');
@@ -195,10 +200,12 @@ async function main() {
       } const L = await import('../src/live.mjs'); return L[`${cmd}Cli`]({ p: here(null), rest, flags, who: who(), out, fail }); }
     case 'watch': { const { watchOnce } = await import('../src/watch.mjs'); const rs = watchOnce({ who: flags.who || 'xyz-watch' }); return out(rs, rs.map(r => `${r.project}: ${r.error ? `⚠ ${r.error}` : r.receipt ? `kept ${r.receipt.id} (${r.receipt.title})` : 'no change'}`).join('\n') || 'No projects yet.'); }
     default: {
-      const p = resolveProject(cmd);
+      // a project by name, in as many words as you like: xyz cyclops cli → CyclopsCLI
+      const name = [cmd, ...rest].join(' ');
+      const p = resolveProject(name);
       if (p) return out(projectInfo(p), projectView(p));
-      const m = didYouMean(cmd);
-      console.error(`xyz: "${cmd}" isn't a command or a project.${m.length ? ` Did you mean: ${m.join(' or ')}?` : ''}\n`);
+      const m = didYouMean(name.replace(/\s+/g, ''));
+      console.error(`xyz: "${name}" isn't a command or a project.${m.length ? ` Did you mean: ${m.join(' or ')}?` : ''}\n`);
       console.error(HELP); process.exit(1);
     }
   }

@@ -19,7 +19,9 @@ export function liveInfo(p) {
 
 /** A promoted (or being-checked) copy of a saved state that cwd is inside, for this project: { dir, version } or null. */
 export function copyHere(p, cwd = process.cwd()) {
-  for (let d = resolve(cwd); d.startsWith(p.x + '/'); d = dirname(d)) {
+  // copies live in X/versions/ (in a single project X is the project folder, so Y and Z sit beside versions/)
+  const versions = join(p.x, 'versions');
+  for (let d = resolve(cwd); d.startsWith(versions + '/'); d = dirname(d)) {
     try { const v = JSON.parse(readFileSync(join(d, '.xyz-version'), 'utf8')); return { dir: d, version: v.version }; } catch {}
   }
   return null;
@@ -79,7 +81,7 @@ export function listInfo() {
       let active = Math.max(last?.at ?? 0, mt(join(p.z, 'receipts.jsonl')), mt(join(p.z, 'touches.jsonl')));
       try { for (const l of readdirSync(join(p.z, 'lanes'))) active = Math.max(active, mt(join(p.z, 'lanes', l, 'lane.json')), mt(join(p.z, 'lanes', l, 'checkpoint.json'))); } catch {}
       if (unsaved && c) for (const r of [...c.added, ...c.changed]) active = Math.max(active, mt(join(p.y, r)));
-      return { name: p.name, home: h, y: p.y, x: p.x, z: p.z, active, about: about.replace(/\s+/g, ' ').slice(0, 300), last: last ? { id: last.id, at: last.at, title: last.title, who: last.who } : null, unsaved, live: lv.current, liveLabel: lv.label, lanes };
+      return { name: p.name, home: h, y: p.y, x: p.x, z: p.z, active, about: about.replace(/\s+/g, ' ').slice(0, 300), last: last ? { id: last.id, at: last.at, title: last.title, who: last.who } : null, unsaved, live: lv.current, liveLabel: lv.label, lanes, layout: p.layout };
     } catch (e) { return { name: basename(h), home: h, error: e.message }; }
   });
 }
@@ -89,5 +91,5 @@ export function listView() {
   if (!rows.length) return 'No XYZ projects yet. Start one with: xyz new <Name>   or bring one in: xyz convert <folder>';
   const w = Math.max(...rows.map(r => r.name.length)) + 2;
   return rows.map(r => r.error ? `${r.name.padEnd(w)} ⚠ ${r.error}` :
-    `${r.name.padEnd(w)} ${r.last ? `${ago(r.last.at).padEnd(12)} ${r.last.title}` : 'no receipts'}${r.unsaved ? `  · ${r.unsaved} unsaved` : ''}${r.live ? '  · live' : ''}`).join('\n');
+    `${r.name.padEnd(w)} ${r.last ? `${ago(r.last.at).padEnd(12)} ${r.last.title}` : 'no receipts'}${r.unsaved ? `  · ${r.unsaved} unsaved` : ''}${r.live ? '  · live' : ''}${r.layout === 'single' ? `  · single: ${r.home}` : ''}`).join('\n');
 }

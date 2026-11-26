@@ -19,7 +19,9 @@ export function openProject(home) {
   if (!existsSync(join(home, 'xyz.json'))) throw new Error(`${home} is not an XYZ project home`);
   const config = readConfig(home);
   let y = join(home, 'Y'); try { y = realpathSync(y); } catch { throw new Error(`${config.name}: its source (Y) is missing — ${join(home, 'Y')} points nowhere`); }
-  return { name: config.name, home, x: join(home, 'X'), y, z: join(home, 'Z'), config };
+  // single: the project folder is X itself (current, versions/, history.jsonl), with Y/ and Z/ inside it
+  const x = config.layout === 'single' ? home : join(home, 'X');
+  return { name: config.name, home, x, y, z: join(home, 'Z'), config, layout: config.layout === 'single' ? 'single' : 'library' };
 }
 
 /** Every project home under the root (real folders or links to homes elsewhere). */
@@ -32,18 +34,40 @@ function notesStarter(name, about = '') {
   return `# ${name}\n\n${about || 'What this is, in a sentence or two.'}\n\n## How it runs\n\n(How to start it, where it lives, which services.)\n\n## In progress\n\n(What someone is working on right now, and what is next.)\n\n## For the next person\n\nRun \`xyz ${name}\` to see everything about this project. Work in Y. When you finish something, \`xyz save "why"\`.\n`;
 }
 
+function singleAgents(name) {
+  return `# ${name} — kept with XYZ (single project)
+
+This folder is the whole project, so you can start here and stay here:
+
+- **This folder is X**, the live app: \`current\` points at the live version, its past versions are in \`versions/\`.
+  Don't edit them.
+- **Y/** is where the work happens: edit files there.
+- **Z/** is the project's memory: receipts, undo history and \`Z/NOTES.md\`. Don't edit it by hand.
+
+Start with \`xyz arrive\`: what this is, how to run and test it, what's in progress. Every xyz command works from
+this folder. Finish a piece with \`xyz save "what and why" --who <your name>\`; \`xyz test\` runs the suite;
+\`xyz promote\` makes Y live (only when asked); \`xyz help\` has the rest. Don't use git here.
+`;
+}
+
 function writeConfig(home, extra = {}) {
   writeAtomic(join(home, 'xyz.json'), JSON.stringify({ name: basename(home), skip: [], deps: [], check: '', services: [], servicesFromX: false, tryMaxMB: 2048, ...extra }, null, 2) + '\n');
 }
 
-/** A brand-new project. With at: made in that folder and linked from the root. */
-export function newProject(name, { at = null, who = 'owner' } = {}) {
+/**
+ * A brand-new project. Library (the default): X, Y and Z side by side in ~/XYZ/<Name> (with at: made in that folder and
+ * linked from the root). Single: one folder, made where you are (or at), that is X itself, with Y/ and Z/ inside it;
+ * the root keeps only a link to it, so `xyz list`, the auto-saver and names still find it.
+ */
+export function newProject(name, { at = null, who = 'owner', single = false } = {}) {
   if (!/^[\w][\w .-]*$/.test(name)) throw new Error(`"${name}" can't be a project name; use letters, numbers, spaces, - or _`);
-  const link = join(ROOT(), name), home = at ? join(resolve(at), name) : link;
+  const link = join(ROOT(), name), home = single ? join(resolve(at ?? process.cwd()), name) : at ? join(resolve(at), name) : link;
   for (const h of new Set([home, link])) if (existsSync(h)) throw new Error(`${name} already exists at ${h}`);
-  for (const d of ['X', 'Y', 'Z']) mkdirSync(join(home, d), { recursive: true });
+  for (const d of single ? ['Y', 'Z'] : ['X', 'Y', 'Z']) mkdirSync(join(home, d), { recursive: true });
   if (home !== link) { mkdirSync(ROOT(), { recursive: true }); symlinkSync(home, link); }
-  writeConfig(home);
+  writeConfig(home, single ? { layout: 'single' } : {});
+  // an agent launched in a single project's folder (often a sandbox kept to that folder) reads these first
+  if (single) { writeAtomic(join(home, 'AGENTS.md'), singleAgents(name)); writeAtomic(join(home, 'CLAUDE.md'), '@AGENTS.md\n'); }
   writeAtomic(join(home, 'Y', '.xyz'), home + '\n');
   writeAtomic(join(home, 'Z', 'NOTES.md'), notesStarter(name));
   const p = openProject(home);

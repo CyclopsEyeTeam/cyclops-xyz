@@ -13,6 +13,8 @@ history and one `NOTES.md`). One command, `xyz`, does everything. The person you
 version-control ceremony: never ask them about commits, staging, branches or saving.
 
 **When you arrive**
+- First, `xyz list` (every project, its latest change, what's live), then `xyz` and `xyz arrive` in the project (where X, Y and Z are, what's unsaved, the brief); tell the person what you see.
+- A single project (one folder that is X, with `Y/` and `Z/` inside) can be worked from its folder: edit in `Y/`; every `xyz` command works from there.
 - Run `xyz arrive` inside the project folder (or `xyz arrive <project>` from anywhere; names match loosely).
   It is a short brief: what the project is, how to run and test it, where things live, what to be careful
   with, what is in progress and what changed lately. A session-start hook can inject it for you:

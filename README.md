@@ -78,6 +78,30 @@ xyz
 is live, what changed since the last receipt, and the latest receipts. From anywhere, `xyz <name>` does
 the same for any project (`xyz hello`, `xyz --hello-xyz` and `xyz HelloXYZ` all work).
 
+### Library or single
+
+There are two ways to lay a project out. Pick one per project when you make it.
+
+- **Library** (the default, `xyz new HelloXYZ`): every project lives in one XYZ folder, `~/XYZ`, and each
+  one has `X/`, `Y/` and `Z/` side by side: `~/XYZ/HelloXYZ/{X,Y,Z}`.
+- **Single** (`xyz new HelloXYZ --single`): one folder, made where you are, holds everything. The folder
+  you make *is* X, the live app (`current` points at the live version, with the versions beside it).
+  Y and Z are folders inside it:
+
+```
+HelloXYZ/          ← X: the live app
+├── current        → versions/s-…   (what is live)
+├── versions/
+├── Y/             ← where you work
+├── Z/             ← memory: receipts, undo, NOTES.md
+└── xyz.json
+```
+
+Everything works the same in both: saving, promoting, rolling back, lanes, `xyz test`. A single project
+still gets a small link in `~/XYZ`, so `xyz list`, the auto-saver and `xyz <name>` find it. Keep the
+folder where you made it: its pieces point at each other by full path. `xyz extract` always exports a
+project in the library layout.
+
 Already have a folder of work? Bring it in where it is: it becomes Y and nothing moves.
 
 ```sh
@@ -126,6 +150,7 @@ Each project home (`~/XYZ/<project>/`) has a small `xyz.json`:
 | `services` / `servicesFromX` | systemd user services to restart after a promote or rollback, once they run from `X/current`. |
 | `tryMaxMB` | The largest project `xyz try` will copy into RAM (2048 by default). |
 | `tests` | How `xyz test` finds and runs the test files (below). |
+| `layout` | `"single"` for a project whose folder is X with Y and Z inside (set by `xyz new --single`); absent for the library layout. |
 
 `XYZ_ROOT` moves the list of projects (default `~/XYZ`); `XYZ_RAM` moves the RAM copies.
 
@@ -138,6 +163,28 @@ instruction block: copy it into your agent's instructions (for example `~/.codex
 project's `AGENTS.md` or `CLAUDE.md`) and agents will look around with `xyz`, sign their own receipts
 and keep `NOTES.md` current. In our first test, an agent told nothing about XYZ found it on its own,
 read the notes, did its job and signed its receipt.
+
+### Start every session the same way
+
+Ask your agent to begin with these, before it reads any code:
+
+```
+xyz list      # every project: its latest change, unsaved files, what's live (single projects show their folder)
+xyz           # inside a project: where X, Y and Z are, what's live, what's unsaved, the latest receipts
+xyz arrive    # the agent's brief: what it is, how to run and test it, what's moving, the last suite run
+```
+
+A line you can paste: *"Start by running `xyz list`, then `xyz` and `xyz arrive` in the project, and tell
+me what you see."* With the session-start hook installed (`xyz arrive --hook`), Claude Code gets the brief
+by itself.
+
+Which folder to start an agent in:
+
+- **Library project:** its **Y** folder (`~/XYZ/<Name>/Y`, or wherever Y really lives). That's where the
+  work happens, and every `xyz` command works from there.
+- **Single project:** **the project folder itself**. Everything (X, Y, Z) is inside it, so an agent kept to
+  that one folder (a sandbox) can still save, test and promote. Its `AGENTS.md` tells the agent to edit
+  in `Y/`.
 
 ### Many agents at once: lanes
 
